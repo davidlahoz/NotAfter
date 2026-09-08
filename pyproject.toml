@@ -1,0 +1,68 @@
+[project]
+name = "notafter"
+version = "1.0.0"
+description = "A certificate expiry board with upload, notifications and calendar invites."
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["alembic/versions", "web/node_modules"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",      # pycodestyle
+    "F",           # pyflakes
+    "I",           # isort
+    "UP",          # pyupgrade
+    "B",           # bugbear
+    "C4",          # comprehensions
+    "DTZ",         # naive datetimes
+    "S",           # bandit
+    "SIM",         # simplify
+    "RUF",         # ruff-specific
+    "ANN",         # annotations
+    "D",           # docstrings
+]
+ignore = [
+    "D203",   # incompatible with D211
+    "D213",   # incompatible with D212
+    "ANN401", # a deliberate Any in audit details
+    "D401",   # imperative mood is not always the clearest
+    "D105",   # magic methods explain themselves
+    "D107",   # documented on the class instead
+    "B008",   # FastAPI declares dependencies as argument defaults
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests read best without fixture annotations and use local dates freely.
+"tests/*" = [
+    "S101", "S105", "S106",          # asserts and fake credentials are the point
+    "D100", "D101", "D102", "D103",  # test names are the documentation
+    "ANN001", "ANN003", "ANN201", "ANN202",
+    "DTZ005", "DTZ011",              # local "today" is what a reader would use
+    "SLF001",
+]
+"alembic/*" = ["D", "ANN", "INP001"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+plugins = []
+exclude = ["^alembic/versions/", "^web/"]
+
+[[tool.mypy.overrides]]
+module = ["apscheduler.*", "icalendar.*", "aiosmtplib.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
+addopts = "-q"
+markers = ["browser: needs Playwright and a Chromium build (optional in CI)"]

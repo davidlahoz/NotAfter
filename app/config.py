@@ -1,0 +1,152 @@
+"""Application configuration, loaded from the environment only."""
+
+from __future__ import annotations
+
+import sys
+from functools import lru_cache
+from typing import Literal
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+AuthMode = Literal["cloudflare", "dev"]
+
+#: Placeholder secret. Running in ``cloudflare`` mode with this value set is
+#: refused at start-up.
+DEV_SECRET_KEY = "dev-insecure-secret-change-me"  # noqa: S105
+
+
+class ConfigError(RuntimeError):
+    """Raised when the environment is not a usable configuration."""
+
+
+class Settings(BaseSettings):
+    """Environment-provided settings.
+
+    Nothing here is ever written to the database or a log line; secrets are
+    redacted by :func:`app.logging_setup.redact` before anything is emitted.
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=False,
+    )
+
+    # --- Core -----------------------------------------------------------
+    app_name: str = "NotAfter"
+    base_url: str = "http://127.0.0.1:8000"
+    secret_key: str = Field(
+        default="dev-insecure-secret-change-me",
+        description="HMAC key for CSRF tokens. Must be set in production.",
+    )
+    database_url: str = "sqlite:////data/notafter.db"
+    log_level: str = "INFO"
+
+    # --- Authentication -------------------------------------------------
+    auth_mode: AuthMode = "cloudflare"
+    cf_access_team: str = ""
+    cf_access_aud: str = ""
+    editor_emails: str = ""
+    dev_user_email: str = "dev@example.org"
+
+    # --- Scheduler ------------------------------------------------------
+    scheduler_enabled: bool = True
+    daily_run_time: str = "07:00"
+    timezone: str = "UTC"
+
+    # --- SMTP -----------------------------------------------------------
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_use_starttls: bool = True
+    smtp_use_tls: bool = False
+    smtp_from: str = ""
+    smtp_from_name: str = "NotAfter"
+    smtp_timeout: int = 30
+
+    # --- Limits ---------------------------------------------------------
+    max_upload_bytes: int = 256 * 1024
+    upload_rate_limit: str = "20/hour"
+    settings_rate_limit: str = "30/hour"
+
+    @field_validator("daily_run_time")
+    @classmethod
+    def _validate_time(cls, value: str) -> str:
+        parts = value.split(":")
+        if len(parts) != 2 or not all(p.isdigit() for p in parts):
+            msg = f"DAILY_RUN_TIME must look like '07:00', got {value!r}"
+            raise ValueError(msg)
+        hour, minute = int(parts[0]), int(parts[1])
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            msg = f"DAILY_RUN_TIME out of range: {value!r}"
+            raise ValueError(msg)
+        return value
+
+    @property
+    def editor_email_set(self) -> frozenset[str]:
+        """Lower-cased set of addresses allowed to make changes."""
+        return frozenset(
+            item.strip().lower() for item in self.editor_emails.split(",") if item.strip()
+        )
+
+    @property
+    def cf_issuer(self) -> str:
+        """Expected ``iss`` claim of an Access token."""
+        return f"https://{self.cf_access_team}.cloudflareaccess.com"
+
+    @property
+    def cf_certs_url(self) -> str:
+        """Where Cloudflare publishes the Access signing keys."""
+        return f"{self.cf_issuer}/cdn-cgi/access/certs"
+
+    @property
+    def smtp_configured(self) -> bool:
+        """Whether enough is set for email to be attempted."""
+        return bool(self.smtp_host and self.smtp_from)
+
+    def validate_startup(self) -> None:
+        """Fail fast on configurations that would be unsafe to run.
+
+        Raises:
+            ConfigError: with a message that explains exactly what to set.
+        """
+        if self.auth_mode == "cloudflare":
+            missing = [
+                name
+                for name, value in (
+                    ("CF_ACCESS_TEAM", self.cf_access_team),
+                    ("CF_ACCESS_AUD", self.cf_access_aud),
+                )
+                if not value
+            ]
+            if missing:
+                msg = (
+                    f"AUTH_MODE=cloudflare requires {' and '.join(missing)}. "
+                    "CF_ACCESS_TEAM is your Cloudflare Access team name (the "
+                    "'<team>' in https://<team>.cloudflareaccess.com) and "
+                    "CF_ACCESS_AUD is the Application Audience tag of the "
+                    "Access application in front of this app."
+                )
+                raise ConfigError(msg)
+            if self.secret_key == DEV_SECRET_KEY:
+                msg = (
+                    "SECRET_KEY is still the built-in development value. "
+                    "Generate one with: python -c "
+                    "'import secrets; print(secrets.token_urlsafe(48))'"
+                )
+                raise ConfigError(msg)
+        if not self.editor_email_set:
+            print(
+                "notafter: warning: EDITOR_EMAILS is empty, so every "
+                "authenticated user is read-only.",
+                file=sys.stderr,
+            )
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    """Return the process-wide settings singleton."""
+    return Settings()
