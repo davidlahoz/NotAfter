@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block refresh %}{% endblock %}
+{% block content %}
+<h2>Audit trail</h2>
+<p class="lede">Every change and every notification. File contents are never
+recorded here — only what changed and who changed it.</p>
+
+{% if entries %}
+<div class="table-scroll">
+<table>
+  <thead><tr><th>When</th><th>Who</th><th>What</th><th>Target</th><th>Details</th></tr></thead>
+  <tbody>
+  {% for entry in entries %}
+    <tr>
+      <td>{{ entry.at | datetime }}</td>
+      <td>{{ entry.actor_email }}</td>
+      <td>{{ entry.action }}</td>
+      <td>{{ entry.target }}</td>
+      <td class="mono">{{ entry.details_json }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<div class="actions">
+  {% if page > 1 %}<a class="small" href="/audit?page={{ page - 1 }}">← newer</a>{% endif %}
+  {% if has_next %}<a class="small" href="/audit?page={{ page + 1 }}">older →</a>{% endif %}
+</div>
+{% else %}<p class="muted">Nothing recorded yet.</p>{% endif %}
+{% endblock %}

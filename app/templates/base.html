@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{% block refresh %}<meta http-equiv="refresh" content="3600">{% endblock %}
+<meta name="referrer" content="no-referrer">
+<title>{{ title }} — NotAfter</title>
+<link rel="stylesheet" href="/static/notafter.css">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+<header class="masthead">
+  <div class="masthead-inner">
+    <h1><a href="/">NotAfter</a></h1>
+    <nav>
+      <a href="/"{% if request.url.path == '/' %} aria-current="page"{% endif %}>Board</a>
+      <a href="/archive"{% if request.url.path == '/archive' %} aria-current="page"{% endif %}>Archive</a>
+      {% if user and user.is_editor %}
+        <a href="/certificates/new"{% if request.url.path == '/certificates/new' %} aria-current="page"{% endif %}>Register</a>
+        <a href="/settings"{% if request.url.path == '/settings' %} aria-current="page"{% endif %}>Settings</a>
+        <a href="/audit"{% if request.url.path == '/audit' %} aria-current="page"{% endif %}>Audit</a>
+      {% endif %}
+      {% if user %}<span class="who">{{ user.email }}{% if not user.is_editor %} · read only{% endif %}</span>{% endif %}
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  {% if message %}<p class="notice">{{ message }}</p>{% endif %}
+  {% if error_message %}<p class="warning">{{ error_message }}</p>{% endif %}
+  {% block content %}{% endblock %}
+
+  <footer>
+    <p>NotAfter {{ app_version }} — a register of certificate expiry dates.
+    Private keys are never uploaded, parsed or stored.</p>
+  </footer>
+</main>
+{% block scripts %}{% endblock %}
+</body>
+</html>

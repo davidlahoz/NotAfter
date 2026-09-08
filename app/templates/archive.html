@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Archived certificates</h2>
+<p class="lede">Replaced or retired records, kept for history. They send no
+notifications and their calendar events have been cancelled.</p>
+
+{% if certificates %}
+<div class="board">
+  {% for cert in certificates %}{% include "_entry.html" %}{% endfor %}
+</div>
+{% else %}
+<p class="lede">Nothing has been archived.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block refresh %}{% endblock %}
+{% block content %}
+<h2>{{ heading }}</h2>
+<p class="lede">{{ message }}</p>
+{% if detail and detail.recorded_expiry %}
+<dl class="facts">
+  <dt>Date recorded by hand</dt><dd>{{ detail.recorded_expiry }}</dd>
+  <dt>Date in the certificate</dt><dd>{{ detail.certificate_expiry }}</dd>
+</dl>
+{% endif %}
+{% if detail and detail.choices %}
+<p>The file contains more than one end-entity certificate:</p>
+<ul>
+  {% for choice in detail.choices %}
+  <li>{{ choice.subject_cn or 'no common name' }} — expires {{ choice.not_after }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+<p><a href="/">Back to the board</a></p>
+{% endblock %}

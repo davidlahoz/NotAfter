@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block refresh %}{% endblock %}
+{% block content %}
+<h2>Register a certificate</h2>
+<p class="lede">Three ways to do this. Uploading the file is best, because the
+expiry date is then read from the certificate itself and cannot be mistyped.</p>
+
+<div class="tabs" role="tablist" data-tabs hidden>
+  <button type="button" class="tab" role="tab" data-tab="upload" aria-selected="true" aria-controls="panel-upload" id="tab-upload">Upload a file</button>
+  <button type="button" class="tab" role="tab" data-tab="manual" aria-selected="false" aria-controls="panel-manual" id="tab-manual">Enter the expiry by hand</button>
+  <button type="button" class="tab" role="tab" data-tab="help" aria-selected="false" aria-controls="panel-help" id="tab-help">Renew or replace</button>
+</div>
+
+<section class="panel" id="panel-upload" role="tabpanel" aria-labelledby="tab-upload" data-panel="upload">
+  <h3>Upload a certificate file</h3>
+  <p class="reassurance">Accepted: .pfx, .p12, .pem, .crt, .cer, .der, .p7b, .p7c.
+  <strong>Only the public certificate will be saved. The private key and the
+  password stay on your computer</strong> — .pfx and .p12 files are opened by
+  your browser, and the file itself is never sent anywhere.</p>
+
+  <form method="post" action="/certificates/new/upload" enctype="multipart/form-data"
+        data-upload-form data-json-url="{{ post_url }}" data-mode="create">
+    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+
+    <div class="field">
+      <label for="file">Certificate file</label>
+      <input type="file" id="file" name="file" data-cert-file required
+             accept=".pfx,.p12,.pem,.crt,.cer,.der,.p7b,.p7c">
+    </div>
+
+    <div data-preview hidden></div>
+
+    <div class="field">
+      <label for="upload-label">Label</label>
+      <input type="text" id="upload-label" name="label" required maxlength="200"
+             placeholder="Integration PROD">
+      <span class="hint">A name people will recognise on the board.</span>
+    </div>
+    <div class="field">
+      <label for="upload-environment">Environment</label>
+      <input type="text" id="upload-environment" name="environment" maxlength="60" placeholder="PROD">
+    </div>
+    <div class="field">
+      <label for="upload-owner">Owner email</label>
+      <input type="email" id="upload-owner" name="owner_email" maxlength="200"
+             placeholder="owner@example.org">
+      <span class="hint">Who is responsible for renewing it. They are notified too.</span>
+    </div>
+    <div class="field">
+      <label for="upload-notes">Notes</label>
+      <textarea id="upload-notes" name="notes" maxlength="2000"></textarea>
+    </div>
+
+    <div class="actions"><button type="submit">Register this certificate</button></div>
+  </form>
+</section>
+
+<section class="panel" id="panel-manual" role="tabpanel" aria-labelledby="tab-manual" data-panel="manual">
+  <h3>Enter the expiry by hand</h3>
+  <p class="reassurance">For when you do not have the file, or do not have its
+  password. The record is marked <span class="unverified">unverified</span>
+  until someone attaches the certificate later.</p>
+
+  <form method="post" action="/certificates/new/manual">
+    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+    <div class="field">
+      <label for="manual-label">Label</label>
+      <input type="text" id="manual-label" name="label" required maxlength="200"
+             placeholder="Partner AS2 signing certificate">
+    </div>
+    <div class="field">
+      <label for="manual-expiry">Expiry date</label>
+      <input type="date" id="manual-expiry" name="expiry_date" required>
+      <span class="hint">The last day the certificate is valid.</span>
+    </div>
+    <div class="field">
+      <label for="manual-environment">Environment</label>
+      <input type="text" id="manual-environment" name="environment" maxlength="60" placeholder="TEST">
+    </div>
+    <div class="field">
+      <label for="manual-owner">Owner email</label>
+      <input type="email" id="manual-owner" name="owner_email" maxlength="200"
+             placeholder="owner@example.org">
+    </div>
+    <div class="field">
+      <label for="manual-cn">Common name (optional)</label>
+      <input type="text" id="manual-cn" name="subject_cn" maxlength="200" placeholder="edi.example.org">
+    </div>
+    <div class="field">
+      <label for="manual-issuer">Issued by (optional)</label>
+      <input type="text" id="manual-issuer" name="issuer" maxlength="200">
+    </div>
+    <div class="field">
+      <label for="manual-notes">Notes</label>
+      <textarea id="manual-notes" name="notes" maxlength="2000"></textarea>
+    </div>
+    <div class="actions"><button type="submit">Record this expiry date</button></div>
+  </form>
+</section>
+
+<section class="panel" id="panel-help" role="tabpanel" aria-labelledby="tab-help" data-panel="help">
+  <h3>Renew or replace an existing certificate</h3>
+  <p class="lede">Renewals start from the certificate that is being replaced,
+  so that the history stays joined up. Open the certificate on the board and
+  use <em>Renew or replace</em> there.</p>
+  <p><a href="/">Go to the board</a></p>
+</section>
+{% endblock %}
+
+{% block scripts %}<script src="/static/upload.js" defer></script>{% endblock %}

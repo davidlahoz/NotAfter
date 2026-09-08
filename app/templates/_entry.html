@@ -1,0 +1,20 @@
+{# One row of the board. `cert` and `app_settings` must be in scope. #}
+{% set days = days_left(cert.not_after, today) %}
+{% set state = status_for(days, warn_days=app_settings.warn_days, critical_days=app_settings.critical_days) %}
+<article class="entry level-{{ state.level.value }}">
+  <p class="countdown">
+    {% if days < 0 %}{{ -days }}{% else %}{{ days }}{% endif %}
+    <span class="unit">{% if days < 0 %}day{{ '' if -days == 1 else 's' }} ago{% elif days == 0 %}expires today{% else %}day{{ '' if days == 1 else 's' }} left{% endif %}</span>
+  </p>
+  <div>
+    <h3 class="entry-name"><a href="/certificates/{{ cert.id }}">{{ cert.label }}</a></h3>
+    <p class="entry-status"><span class="status-word">{{ state.word }}.</span> {{ state.sentence }}</p>
+    <p class="entry-facts">
+      <span>Valid until {{ cert.not_after | date }}</span>
+      {% if cert.subject_cn %}<span>{{ cert.subject_cn }}</span>{% endif %}
+      {% if cert.owner_email %}<span>{{ cert.owner_email }}</span>{% endif %}
+      {% if cert.environment %}<span class="tag">{{ cert.environment }}</span>{% endif %}
+      {% if not cert.verified %}<span class="unverified">manual entry — unverified</span>{% endif %}
+    </p>
+  </div>
+</article>

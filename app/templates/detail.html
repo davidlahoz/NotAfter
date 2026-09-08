@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block refresh %}{% endblock %}
+{% block content %}
+{% set days = days_left(cert.not_after, today) %}
+{% set state = status_for(days, warn_days=app_settings.warn_days, critical_days=app_settings.critical_days) %}
+
+<div class="detail-head level-{{ state.level.value }}">
+  <p class="countdown">
+    {% if days < 0 %}{{ -days }}{% else %}{{ days }}{% endif %}
+    <span class="unit">{% if days < 0 %}day{{ '' if -days == 1 else 's' }} ago{% elif days == 0 %}expires today{% else %}day{{ '' if days == 1 else 's' }} left{% endif %}</span>
+  </p>
+  <h2 class="detail-title">{{ cert.label }}</h2>
+  <p class="entry-status"><span class="status-word">{{ state.word }}.</span> {{ state.sentence }}</p>
+  {% if cert.status.value == 'archived' %}
+    <p class="muted small">Archived {{ cert.archived_at | datetime }}{% if cert.archive_reason %} — {{ cert.archive_reason }}{% endif %}</p>
+  {% endif %}
+  {% if not cert.verified %}<p class="unverified small">Manual entry — the expiry date has not been checked against a certificate file.</p>{% endif %}
+</div>
+
+<h2>What this is</h2>
+<dl class="facts">
+  <dt>Valid until</dt><dd>{{ cert.not_after | date }}</dd>
+  {% if cert.not_before %}<dt>Valid from</dt><dd>{{ cert.not_before | date }}</dd>{% endif %}
+  <dt>Environment</dt><dd>{{ cert.environment or 'not set' }}</dd>
+  <dt>Owner</dt><dd>{{ cert.owner_email or 'not set' }}</dd>
+  <dt>Common name</dt><dd>{{ cert.subject_cn or 'not recorded' }}</dd>
+  {% if cert.subject_rfc4514 %}<dt>Subject</dt><dd class="mono">{{ cert.subject_rfc4514 }}</dd>{% endif %}
+  {% if cert.issuer_rfc4514 %}<dt>Issued by</dt><dd class="mono">{{ cert.issuer_rfc4514 }}</dd>{% endif %}
+  {% if cert.serial_decimal %}<dt>Serial number</dt><dd class="mono">{{ cert.serial_decimal }}</dd>{% endif %}
+  {% if cert.fingerprint_sha256 %}<dt>SHA-256 fingerprint</dt><dd class="mono">{{ cert.fingerprint_sha256 | fingerprint }}</dd>{% endif %}
+  {% if cert.sans %}<dt>Also valid for</dt><dd class="mono">{{ cert.sans | join(', ') }}</dd>{% endif %}
+  {% if cert.key_algorithm %}<dt>Key</dt><dd>{{ cert.key_algorithm }}{% if cert.key_size %}, {{ cert.key_size }} bits{% endif %}</dd>{% endif %}
+  <dt>Registered</dt><dd>{{ cert.created_at | datetime }}{% if cert.created_by %} by {{ cert.created_by }}{% endif %}</dd>
+  <dt>Reminders</dt><dd>{% if cert.muted %}Muted{% else %}On — {{ notify_recipients | names('the default recipients') }}{% endif %}</dd>
+  {% if cert.notes %}<dt>Notes</dt><dd>{{ cert.notes }}</dd>{% endif %}
+</dl>
+
+{% if previous or successor %}
+<h2>Renewal chain</h2>
+<p>
+  {% if previous %}Replaces <a href="/certificates/{{ previous.id }}">{{ previous.label }}</a> (expired {{ previous.not_after | date }}).{% endif %}
+  {% if successor %}Replaced by <a href="/certificates/{{ successor.id }}">{{ successor.label }}</a> (valid until {{ successor.not_after | date }}).{% endif %}
+</p>
+{% endif %}
+
+{% if user and user.is_editor %}
+<h2>Change this record</h2>
+<form method="post" action="/certificates/{{ cert.id }}/update">
+  <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+  <div class="field"><label for="label">Label</label>
+    <input type="text" id="label" name="label" value="{{ cert.label }}" required maxlength="200"></div>
+  <div class="field"><label for="environment">Environment</label>
+    <input type="text" id="environment" name="environment" value="{{ cert.environment }}" maxlength="60">
+    <span class="hint">For example TEST or PROD.</span></div>
+  <div class="field"><label for="owner_email">Owner email</label>
+    <input type="email" id="owner_email" name="owner_email" value="{{ cert.owner_email }}" maxlength="200"></div>
+  <div class="field"><label for="extra_recipients">Extra people to notify</label>
+    <input type="text" id="extra_recipients" name="extra_recipients" value="{{ cert.extra_recipients | join(', ') }}">
+    <span class="hint">Email addresses, separated by commas. They are notified in addition to the default recipients.</span></div>
+  <div class="field"><label for="notes">Notes</label>
+    <textarea id="notes" name="notes" maxlength="2000">{{ cert.notes }}</textarea></div>
+  <div class="checkbox">
+    <input type="checkbox" id="muted" name="muted" value="1"{% if cert.muted %} checked{% endif %}>
+    <label for="muted">Mute reminders for this certificate</label></div>
+  <div class="actions"><button type="submit">Save changes</button></div>
+</form>
+
+<h2>Actions</h2>
+<div class="actions">
+  <form method="post" action="/certificates/{{ cert.id }}/test-notification">
+    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+    <button type="submit" class="secondary">Send test notification to me</button>
+  </form>
+  <form method="post" action="/certificates/{{ cert.id }}/resend-invites">
+    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+    <button type="submit" class="secondary">Resend calendar invites</button>
+  </form>
+  {% if cert.status.value == 'archived' %}
+  <form method="post" action="/certificates/{{ cert.id }}/restore">
+    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+    <button type="submit" class="secondary">Restore to the board</button>
+  </form>
+  {% endif %}
+</div>
+
+{% if cert.status.value != 'archived' %}
+<h2>Renew or replace</h2>
+<p class="lede">Upload the new certificate. This record is archived and kept
+for history, its reminders stop, its calendar events are cancelled, and new
+invites go out for the replacement.</p>
+<form method="post" action="/certificates/{{ cert.id }}/renew" enctype="multipart/form-data"
+      data-upload-form data-json-url="/api/certificates/{{ cert.id }}/renew" data-mode="renew">
+  <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+  <div class="field"><label for="renew-file">New certificate file</label>
+    <input type="file" id="renew-file" name="file" data-cert-file
+           accept=".pfx,.p12,.pem,.crt,.cer,.der,.p7b,.p7c" required>
+    <span class="hint">.pfx and .p12 files are opened in your browser; only the
+      public certificate is sent.</span></div>
+  <div class="field"><label for="renew-label">Label for the new record</label>
+    <input type="text" id="renew-label" name="label" value="{{ cert.label }}" maxlength="200"></div>
+  <div class="field"><label for="renew-notes">Notes</label>
+    <textarea id="renew-notes" name="notes" maxlength="2000"></textarea></div>
+  <div data-preview hidden></div>
+  <div class="actions"><button type="submit">Register the replacement</button></div>
+</form>
+
+{% if not cert.verified %}
+<h2>Attach the certificate</h2>
+<p class="lede">This record was typed in by hand. Attach the certificate file
+to check the date and mark it verified.</p>
+<form method="post" action="/certificates/{{ cert.id }}/attach" enctype="multipart/form-data"
+      data-upload-form data-json-url="/api/certificates/{{ cert.id }}/attach" data-mode="attach">
+  <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+  <input type="hidden" name="label" value="{{ cert.label }}">
+  <div class="field"><label for="attach-file">Certificate file</label>
+    <input type="file" id="attach-file" name="file" data-cert-file
+           accept=".pfx,.p12,.pem,.crt,.cer,.der,.p7b,.p7c" required></div>
+  <div class="checkbox">
+    <input type="checkbox" id="confirm_replacement" name="confirm_replacement" value="1" data-confirm-replacement>
+    <label for="confirm_replacement">The certificate's own expiry date replaces the one recorded by hand,
+      even if they differ</label></div>
+  <div data-preview hidden></div>
+  <div class="actions"><button type="submit">Attach and verify</button></div>
+</form>
+{% endif %}
+
+<h2>Archive</h2>
+<form method="post" action="/certificates/{{ cert.id }}/archive">
+  <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+  <div class="field"><label for="reason">Why is it being archived?</label>
+    <input type="text" id="reason" name="reason" maxlength="200" placeholder="No longer in use">
+    <span class="hint">The record is kept for history. Reminders stop and calendar events are cancelled.</span></div>
+  <div class="actions"><button type="submit" class="secondary">Archive this certificate</button></div>
+</form>
+{% endif %}
+{% endif %}
+
+<h2>Notifications sent</h2>
+{% if notifications %}
+<div class="table-scroll">
+<table>
+  <thead><tr><th>When</th><th>Channel</th><th>Rule</th><th>Result</th><th>Recipients</th></tr></thead>
+  <tbody>
+  {% for entry in notifications %}
+    <tr>
+      <td>{{ entry.sent_at | datetime }}</td>
+      <td>{{ entry.channel.value }}</td>
+      <td>{% if entry.threshold < 0 %}expired reminder{% else %}{{ entry.threshold }} days{% endif %}</td>
+      <td class="status-{{ entry.status.value }}">{{ entry.status.value }}{% if entry.error %} — {{ entry.error }}{% endif %}</td>
+      <td>{{ entry.recipients | join(', ') or '—' }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">Nothing has been sent for this certificate yet.</p>{% endif %}
+
+<h2>Calendar invites</h2>
+{% if invites %}
+<div class="table-scroll">
+<table>
+  <thead><tr><th>Event</th><th>Date</th><th>Sent</th><th>Sequence</th><th>Method</th><th>Result</th></tr></thead>
+  <tbody>
+  {% for invite in invites %}
+    <tr>
+      <td>{{ 'Expiry' if invite.kind.value == 'expiry' else 'Renewal reminder' }}</td>
+      <td>{{ invite.event_date | date }}</td>
+      <td>{{ invite.sent_at | datetime }}</td>
+      <td>{{ invite.sequence }}</td>
+      <td>{{ invite.method.value }}</td>
+      <td class="status-{{ invite.status.value }}">{{ invite.status.value }}{% if invite.error %} — {{ invite.error }}{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">No calendar invites have been sent for this certificate.</p>{% endif %}
+
+<h2>History</h2>
+{% if audit %}
+<div class="table-scroll">
+<table>
+  <thead><tr><th>When</th><th>Who</th><th>What</th><th>Details</th></tr></thead>
+  <tbody>
+  {% for entry in audit %}
+    <tr><td>{{ entry.at | datetime }}</td><td>{{ entry.actor_email }}</td>
+        <td>{{ entry.action }}</td><td class="mono">{{ entry.details_json }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">Nothing recorded yet.</p>{% endif %}
+{% endblock %}
+
+{% block scripts %}<script src="/static/upload.js" defer></script>{% endblock %}
