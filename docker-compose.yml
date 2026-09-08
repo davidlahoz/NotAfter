@@ -1,0 +1,57 @@
+# NotAfter — one service, nothing else.
+#
+# Ingress is the host's existing cloudflared service: this container publishes
+# only to 127.0.0.1:8087, and the operator adds an ingress rule pointing at it.
+# There is deliberately no tunnel, proxy or ACME container here.
+
+services:
+  notafter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: notafter:1.0.0
+    container_name: notafter
+    restart: unless-stopped
+
+    # Reachable only from the host, which is where cloudflared runs.
+    ports:
+      - "127.0.0.1:8087:8000"
+
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: sqlite:////data/notafter.db
+
+    volumes:
+      - notafter-data:/data
+
+    # Everything except /data and /tmp is immutable at run time.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    user: "10001:10001"
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; r=urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=8); sys.exit(0 if r.status==200 else 1)"
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  notafter-data:

@@ -1,0 +1,376 @@
+# NotAfter
+
+A certificate expiry board. Someone uploads a certificate, everyone else sees
+a plain-language page saying how long is left, and the right people get an
+email, a Teams message and a calendar invite before it runs out.
+
+It was written for the certificates that middleware teams renew by hand and
+track nowhere — AS2 signing and encryption certificates, TLS server
+certificates, partner and client certificates. NotAfter never connects to the
+systems that use those certificates. It is only fed the files.
+
+**NotAfter is a register of expiry dates, not a key store. It never receives,
+parses, stores, logs or transmits a private key.** Everything else in the
+design gives way to that.
+
+- Open source, MIT licensed, self-hosted.
+- One container, SQLite, no cloud dependency.
+- Server-rendered pages; the only JavaScript is the bundle that reads
+  `.pfx` files inside your browser.
+- No external assets at run time: no CDN, no web fonts, no analytics.
+
+---
+
+## What is and isn't stored
+
+This section is for anyone reviewing NotAfter who does not work with
+certificates every day.
+
+A certificate file comes in two shapes. A **certificate** on its own is public
+information — it is what a server hands to anyone who connects to it, and it
+says who the certificate is for, who issued it, and when it expires. A
+**keystore** (a `.pfx` or `.p12` file) is a certificate *plus its private
+key* — the secret half, which proves ownership. Private keys must never be
+copied around.
+
+### What NotAfter stores
+
+For each certificate, exactly these fields:
+
+| Field | Example | Why |
+|---|---|---|
+| Label | `Integration PROD` | The name people recognise |
+| Environment, owner, notes | `PROD`, `owner@example.org` | Typed in by a person |
+| Subject common name | `edi.example.org` | Which system it is for |
+| Subject and issuer | `CN=edi.example.org,O=…` | Who it is for, who issued it |
+| Serial number | `18374…` | Identifies it to the issuer |
+| Valid from / valid until | `8 April 2027` | The point of the whole app |
+| SHA-256 fingerprint | `A1:B2:…` | Spots a re-upload of the same file |
+| Subject alternative names | `DNS:edi.example.org` | Other names it covers |
+| Key algorithm and size | `RSA, 2048 bits` | Describes the key; is not the key |
+| The public certificate (PEM) | `-----BEGIN CERTIFICATE-----…` | Public; used to re-check and de-duplicate |
+
+Plus who registered it and when, which notifications went out, and an audit
+line for every change.
+
+### What NotAfter never stores
+
+- **Private keys.** No column in the database can hold one. There is no code
+  path that reads one.
+- **The uploaded file.** Nothing is written to disk or to a temporary
+  directory. Uploads are parsed in memory and dropped.
+- **The password of a `.pfx` file.** It is typed into the page and used by
+  your browser. It is never sent to the server.
+- **Request bodies, in any log.** Log lines are filtered so that PEM blocks,
+  passwords, tokens and webhook URLs are masked even if a stack trace would
+  otherwise print them.
+
+### How a `.pfx` is handled
+
+1. You pick the file. It is read by **your browser**, not uploaded.
+2. If it is encrypted, the page asks for the password. That happens in the
+   tab; nothing has left your machine yet.
+3. The browser opens only the *certificate bags* of the file. The key bags are
+   skipped — they are never decrypted or read.
+4. The page shows you what it found and sends the server **only the public
+   certificate**, as text.
+5. The file bytes and the password are discarded.
+
+The server independently refuses anything that could carry a key. Send it a
+`.pfx` directly — or a PEM file with a `PRIVATE KEY` block in it — and it
+answers `400` before parsing anything, and writes nothing anywhere. There are
+tests for each of those cases.
+
+---
+
+## How it works
+
+| Page | Who | What |
+|---|---|---|
+| `/` | everyone | The board: every certificate, soonest expiry first |
+| `/certificates/{id}` | everyone | One certificate, its history and its notifications |
+| `/certificates/new` | editors | Upload a file, or type in an expiry date |
+| `/settings` | editors | Recipients, thresholds, Teams webhook, test messages |
+| `/audit` | editors | Every change anyone has made |
+| `/healthz` | the container | Scheduler state and the last job result |
+
+**Status colours.** Green above 60 days, amber at 60 or fewer, red at 30 or
+fewer, red once expired. Both thresholds are configurable. "Days left" is
+never stored — it is worked out from the expiry date every time a page is
+rendered or a notification is considered.
+
+**Notifications.** Once a day the app looks at every active certificate and
+sends the nearest reminder it has just crossed — 60, 30, 14, 7 and 1 day by
+default. Only the nearest one: a certificate registered with 20 days left gets
+the 30-day reminder, not the 60-day one as well. Every send is recorded, and a
+unique constraint in the database means a restart, a second run or a manual
+run can never send the same reminder twice. Failures are retried on the next
+run and shown on the settings page and `/healthz`.
+
+**Calendar invites.** Registering a certificate sends two all-day invites: one
+on the expiry date, one 30 days before it, each with reminders 7 days and 1
+day ahead. They have stable UIDs, so replacing or archiving the certificate
+updates or cancels the events people already have in Outlook or Google
+Calendar rather than leaving them behind.
+
+---
+
+## Requirements
+
+- A Linux host with Docker and the Compose plugin.
+- An existing **host-level** `cloudflared` service, already connected to your
+  Cloudflare account.
+- A Cloudflare Access application in front of the hostname you will use.
+- An SMTP server that will relay for you.
+- Optionally, a Microsoft Teams **Workflows** webhook.
+
+NotAfter does not run a tunnel, a reverse proxy or an ACME client, and the
+compose file has exactly one service. Ingress is the host's business.
+
+---
+
+## Setup
+
+### 1. Get the code and write the configuration
+
+```bash
+git clone https://github.com/example/notafter.git
+cd notafter
+cp .env.example .env
+python3 -c 'import secrets; print(secrets.token_urlsafe(48))'   # SECRET_KEY
+```
+
+Fill in `.env`. The values that matter most:
+
+| Variable | What it is |
+|---|---|
+| `BASE_URL` | The public URL. It goes into every email and invite. |
+| `SECRET_KEY` | The value you just generated. |
+| `CF_ACCESS_TEAM` | The `<team>` in `https://<team>.cloudflareaccess.com`. |
+| `CF_ACCESS_AUD` | The Access application's Audience tag (step 3). |
+| `EDITOR_EMAILS` | Who may change things. Everyone else is read-only. |
+| `SMTP_*` | Your mail relay. `SMTP_FROM` is also the invite organiser. |
+
+The app refuses to start in `AUTH_MODE=cloudflare` without `CF_ACCESS_TEAM`
+and `CF_ACCESS_AUD`, or with the placeholder `SECRET_KEY` still in place.
+
+### 2. Add the tunnel ingress rule (outside this repository)
+
+In your Cloudflare dashboard, on the tunnel the host already runs, add an
+ingress rule:
+
+```
+certs.example.org  →  http://127.0.0.1:8087
+```
+
+Or, if the host's `cloudflared` is configured from a file, add to its
+`ingress:` list — *before* the catch-all rule:
+
+```yaml
+ingress:
+  - hostname: certs.example.org
+    service: http://127.0.0.1:8087
+  - service: http_status:404
+```
+
+then `sudo systemctl reload cloudflared`.
+
+The container publishes only to `127.0.0.1:8087`, so nothing but the host —
+and therefore nothing but the tunnel — can reach it.
+
+### 3. Create the Cloudflare Access application (outside this repository)
+
+In **Zero Trust → Access → Applications**, add a **self-hosted** application
+for `certs.example.org`. Add a policy for the people who should see the board.
+Then open the application's **Overview** tab and copy the **Application
+Audience (AUD) Tag** into `CF_ACCESS_AUD` in your `.env`.
+
+Every request now arrives with a `Cf-Access-Jwt-Assertion` header. NotAfter
+validates that token against Cloudflare's published keys on every request, and
+takes the user's email address from it. It never trusts a header on its own.
+
+### 4. Start it
+
+```bash
+docker compose up -d --build
+docker compose logs -f notafter
+curl -s http://127.0.0.1:8087/healthz
+```
+
+Open `https://certs.example.org`, sign in through Access, and go to
+**Settings** to add the notification recipients.
+
+### 5. Microsoft Teams (optional)
+
+In Teams, on the channel you want: **Workflows → "Post to a channel when a
+webhook request is received"**. Create it, copy the URL, and paste it into
+**Settings → Microsoft Teams**. Then press **Send test Teams card**.
+
+The URL is a secret. It is stored in the database, never shown again after it
+is saved, and masked in log lines. The retired "Office 365 connector" webhooks
+are not supported — the payload NotAfter sends is an Adaptive Card 1.4.
+
+### 6. Check that notifications work
+
+On the settings page: **Send test email to me**, **Send test Teams card**,
+**Send test invite to me**. Then **Run the notification job now** — it is
+idempotent, so it is safe to press whenever you like.
+
+---
+
+## Day-to-day
+
+**Registering a certificate.** Register → *Upload a file* → pick it. For a
+`.pfx`, the page asks for the password if it needs one, and shows what it
+found before anything is sent. If you do not have the file, use *Enter the
+expiry by hand*; the record is marked unverified until someone attaches the
+certificate later.
+
+**Renewing.** Open the certificate, use **Renew or replace**, upload the
+successor. The old record is archived and kept, its reminders stop, its
+calendar events are cancelled, and new invites go out for the replacement.
+
+**Quietening one certificate.** Open it and tick *Mute reminders*. Or archive
+it, with a reason.
+
+---
+
+## Runbook
+
+**Nothing is being sent.** Check `/healthz` (`scheduler.running` should be
+`true`, `last_job` should be recent) and the *Recent problems* table on the
+settings page, which shows the actual error. Failures retry on the next run;
+**Run the notification job now** retries immediately.
+
+**Someone can see the board but cannot change anything.** Their address is not
+in `EDITOR_EMAILS`. Add it and restart the container.
+
+**Everyone gets 401.** The Access application's AUD tag does not match
+`CF_ACCESS_AUD`, or the request is not coming through Access at all. Compare
+the AUD tag in the dashboard with your `.env`.
+
+**A reminder went out twice.** It should not be possible; the database
+prevents it. Check `notification_log` — if there really are two `sent` rows
+for one `(certificate, channel, rule)`, that is a bug worth reporting.
+
+**Backup.** Everything is in the `notafter-data` volume:
+
+```bash
+docker compose stop notafter
+docker run --rm -v notafter-data:/data -v "$PWD":/backup alpine \
+  tar czf /backup/notafter-$(date +%F).tar.gz -C /data .
+docker compose start notafter
+```
+
+**Restore.**
+
+```bash
+docker compose down
+docker volume create notafter-data
+docker run --rm -v notafter-data:/data -v "$PWD":/backup alpine \
+  tar xzf /backup/notafter-2027-04-08.tar.gz -C /data
+docker compose up -d
+```
+
+The database is SQLite in WAL mode, so back it up with the container stopped,
+or copy `notafter.db`, `notafter.db-wal` and `notafter.db-shm` together.
+
+**Upgrading.** `git pull && docker compose up -d --build`. Migrations run at
+start-up. Take a backup first.
+
+---
+
+## Development
+
+```bash
+make setup      # virtual environment and npm packages
+make dev        # http://127.0.0.1:8000 with AUTH_MODE=dev
+make check      # lint, types, tests, dependency audit
+```
+
+`AUTH_MODE=dev` takes the user's email from an `X-Dev-User` header, which
+anyone could forge — it is for local work only and binds to `127.0.0.1`.
+
+```
+app/                FastAPI application
+  parsing.py          the refusal gate, then the parser
+  auth.py             AuthProvider, Cloudflare Access, dev header
+  notifier.py         who gets told, once
+  notify/             email, Teams, iCalendar
+  jobs.py             the daily job and the scheduler
+web/src/            TypeScript: in-browser .pfx extraction
+tests/              pytest, including an optional Playwright test
+alembic/            migrations
+```
+
+Run the browser test — which proves that only PEM leaves the page — with:
+
+```bash
+.venv/bin/pip install playwright && .venv/bin/playwright install chromium
+.venv/bin/pytest -m browser
+```
+
+---
+
+## Security
+
+- **Authentication** is delegated to a trusted identity-aware proxy behind a
+  small `AuthProvider` interface. Cloudflare Access is built in; adding OIDC
+  means writing one class. The Access JWT is validated on every request —
+  issuer, audience, expiry and signature, against keys fetched from
+  `/cdn-cgi/access/certs` and cached.
+- **Roles** are `viewer` (anyone who passes Access) and `editor` (listed in
+  `EDITOR_EMAILS`). Every editor action re-checks.
+- **CSRF**: signed double-submit tokens on every state-changing request.
+- **Rate limits** on uploads and settings changes, per user.
+- **CSP** is `default-src 'self'` with no `unsafe-inline` and no
+  `unsafe-eval`, plus `frame-ancestors 'none'`, `nosniff` and
+  `Referrer-Policy: no-referrer`. There is a test asserting that no served
+  page, script or stylesheet mentions an external origin.
+- **The container** runs as uid 10001 with a read-only root filesystem, all
+  capabilities dropped, `no-new-privileges`, and a pinned base image by
+  digest. It needs outbound access to your SMTP server and, if you use it, the
+  Teams webhook. Nothing else.
+
+Found something? Open an issue for anything that is not itself a
+vulnerability; for a vulnerability, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+---
+
+## Decisions
+
+Choices made while building this, and why.
+
+- **System font stack, no vendored font file.** The specification allowed
+  Inter *if vendored*. Shipping a binary font would add roughly 300 KB and a
+  licence file to a repository whose point is that it serves everything
+  itself; the system stack renders the one bold element — the countdown — just
+  as well. Change `--font` in `app/static/notafter.css` if you disagree.
+- **A small in-process rate limiter instead of `slowapi`.** The specification
+  said "slowapi or equivalent". One container serves this app, so a
+  sliding-window limiter in memory is exactly as effective and is 40 lines
+  with a test, rather than another dependency.
+- **The Teams webhook lives in the database, not the environment.** It is
+  entered on the settings page so it can be rotated without a redeploy. It is
+  never rendered back into the page and is masked in logs.
+- **`/healthz` needs no authentication.** The container healthcheck calls it
+  from inside the container, before any proxy. It exposes no certificate data
+  — only whether the scheduler is running and how the last job went.
+- **CSRF is a dependency, not middleware.** Reading the token out of a
+  multipart body in middleware consumes the request stream before the endpoint
+  can parse it. As a FastAPI dependency it shares Starlette's form cache with
+  the endpoint, so both see the same fields.
+- **Only the nearest crossed threshold is sent.** A certificate added with 20
+  days left would otherwise fire 60, 30 *and* 14 at once. The thresholds it
+  skipped are written to `notification_log` as `skipped`, so they cannot fire
+  later either.
+- **The built browser bundle is committed to `app/static/`.** The Dockerfile
+  rebuilds it from source anyway; committing it means `make dev` and the test
+  suite work without Node installed.
+- **`create_all` at start-up as well as Alembic.** Migrations are what runs in
+  the container; `create_all` is what makes a fresh test database. Both derive
+  from the same models.
+
+## Licence
+
+MIT — see [LICENSE](LICENSE).
