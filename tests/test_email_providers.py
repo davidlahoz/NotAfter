@@ -100,8 +100,8 @@ async def test_a_calendar_invite_keeps_its_method():
         (429, "rate limiting"),
     ],
 )
-async def test_a_refusal_explains_itself(status: int, expected: str):
-    recorder = Recorder(status=status, body={"message": "no"})
+async def test_a_silent_refusal_falls_back_to_our_own_advice(status: int, expected: str):
+    recorder = Recorder(status=status, body={})
     with pytest.raises(DeliveryError) as caught:
         async with recorder.client() as client:
             await email_channel._send_via_resend(message(), resend_settings(), client=client)
@@ -109,15 +109,29 @@ async def test_a_refusal_explains_itself(status: int, expected: str):
     assert str(status) in str(caught.value)
 
 
-async def test_the_api_key_never_appears_in_an_error():
-    recorder = Recorder(status=401, body={"message": "invalid key re_test_key"})
+async def test_resends_own_message_is_preferred_when_it_has_one():
+    """It is more specific than anything this app could guess."""
+    recorder = Recorder(status=403, body={"message": "The example.org domain is not verified."})
     with pytest.raises(DeliveryError) as caught:
         async with recorder.client() as client:
             await email_channel._send_via_resend(message(), resend_settings(), client=client)
-    # The upstream text is echoed, so the redactor is what has to hold here.
-    from app.logging_setup import redact
+    text = str(caught.value)
+    assert "The example.org domain is not verified." in text
+    assert "Verify the EMAIL_FROM domain" not in text, "advice should not be doubled"
 
-    assert "re_test_key" not in redact(f"api_key={caught.value}")
+
+async def test_the_api_key_never_appears_in_an_error():
+    """Resend's text reaches the settings page and notification_log.
+
+    So it is redacted where it is built, not where it is displayed — by then
+    it has already been stored.
+    """
+    recorder = Recorder(status=401, body={"message": "invalid key re_test_key_abcdef"})
+    with pytest.raises(DeliveryError) as caught:
+        async with recorder.client() as client:
+            await email_channel._send_via_resend(message(), resend_settings(), client=client)
+    assert "re_test_key_abcdef" not in str(caught.value)
+    assert "[redacted-api-key]" in str(caught.value)
 
 
 async def test_a_network_failure_says_what_to_check():

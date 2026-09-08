@@ -197,8 +197,10 @@ def _resend_error(response: httpx.Response) -> str:
     }.get(response.status_code, "")
     parts = [f"Resend replied {response.status_code}"]
     if detail:
+        # Resend's own message is usually the more specific of the two, so the
+        # built-in hint is only there for when it says nothing useful.
         parts.append(detail)
-    if hint:
+    elif hint:
         parts.append(hint)
     return ". ".join(parts)
 
