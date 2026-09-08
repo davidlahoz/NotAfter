@@ -1,0 +1,26 @@
+{
+  "name": "notafter-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "In-browser certificate extraction for NotAfter. No runtime CDN: everything is bundled and served by the app.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/upload.ts --bundle --minify --format=iife --target=es2020 --outfile=../app/static/upload.js --legal-comments=none",
+    "watch": "esbuild src/upload.ts --bundle --format=iife --target=es2020 --outfile=../app/static/upload.js --watch",
+    "typecheck": "tsc --noEmit",
+    "audit": "npm audit --omit=dev"
+  },
+  "dependencies": {
+    "asn1js": "3.0.6",
+    "pkijs": "3.3.0",
+    "pvutils": "1.1.3"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "typescript": "5.9.3"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true
+  }
+}
