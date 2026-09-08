@@ -6,7 +6,7 @@ so that every change is audited in the same way.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from sqlmodel import Session, col, select
@@ -71,6 +71,28 @@ def record_audit(
 # --------------------------------------------------------------------------
 # Queries
 # --------------------------------------------------------------------------
+
+
+def sample_certificate(session: Session) -> Certificate:
+    """A certificate to demonstrate a notification with.
+
+    A real one if there is one, so the test shows real wording; otherwise an
+    unsaved stand-in with fictional details.
+    """
+    existing = session.exec(
+        select(Certificate).where(Certificate.status == CertStatus.ACTIVE)
+    ).first()
+    if existing is not None:
+        return existing
+    return Certificate(
+        id=0,
+        label="Integration PROD",
+        environment="PROD",
+        owner_email="owner@example.org",
+        subject_cn="edi.example.org",
+        verified=True,
+        not_after=utcnow() + timedelta(days=30),
+    )
 
 
 def find_by_fingerprint(session: Session, fingerprint: str) -> Certificate | None:

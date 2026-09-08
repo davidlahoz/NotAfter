@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Annotated
 
 from fastapi import APIRouter, Form, Request
@@ -15,6 +16,7 @@ from app.db import load_app_settings
 from app.jobs import last_job_run
 from app.models import (
     DEFAULT_THRESHOLDS,
+    AuditLog,
     Certificate,
     DeliveryStatus,
     NotificationLog,
@@ -23,7 +25,7 @@ from app.models import (
 from app.notify import DeliveryError
 from app.routes.deps import DbSession, Editor, get_config, get_notifier
 from app.security import Rate, limiter
-from app.services import record_audit
+from app.services import record_audit, sample_certificate
 from app.templating import render
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -70,11 +72,21 @@ def settings_page(
         for cert in session.exec(select(Certificate)).all()
         if cert.id is not None
     }
+    app_settings = load_app_settings(session)
+    notifier = get_notifier(request)
+    sample = sample_certificate(session)
     return render(
         request,
         "settings.html",
         {
-            "app_settings": load_app_settings(session),
+            "app_settings": app_settings,
+            "teams_payload": json.dumps(
+                notifier.build_test_payload(sample, app_settings),
+                indent=2,
+                ensure_ascii=False,
+            ),
+            "teams_sample_label": sample.label,
+            "last_teams_test": _last_teams_test(session),
             "env": get_config(),
             "problems": problems,
             "cert_labels": labels,
@@ -171,13 +183,14 @@ async def test_teams(
     app_settings = load_app_settings(session)
     if not app_settings.teams_webhook_url:
         return RedirectResponse("/settings?err=no-teams", status_code=303)
+    sample = sample_certificate(session)
     try:
-        await get_notifier(request).send_test_card(app_settings)
+        status_code = await get_notifier(request).send_test_card(sample, app_settings)
     except DeliveryError as exc:
         _record_problem(session, user, "teams", str(exc))
         return RedirectResponse("/settings?err=send-failed", status_code=303)
-    record_audit(session, user, "settings.test", "teams", {})
-    return RedirectResponse("/settings?msg=test-sent", status_code=303)
+    record_audit(session, user, "settings.test", "teams", {"http_status": status_code})
+    return RedirectResponse(f"/settings?msg=teams-accepted&http={status_code}", status_code=303)
 
 
 @router.post("/test-invite")
@@ -207,6 +220,16 @@ async def test_invite(
         return RedirectResponse("/settings?err=send-failed", status_code=303)
     record_audit(session, user, "settings.test", "calendar", {"to": user.email})
     return RedirectResponse("/settings?msg=test-sent", status_code=303)
+
+
+def _last_teams_test(session: Session) -> AuditLog | None:
+    """The most recent Teams test, so its result stays visible afterwards."""
+    return session.exec(
+        select(AuditLog)
+        .where(AuditLog.action == "settings.test", AuditLog.target == "teams")
+        .order_by(desc(col(AuditLog.at)))
+        .limit(1)
+    ).first()
 
 
 def _record_problem(session: Session, user: User, channel: str, error: str) -> None:

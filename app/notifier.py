@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date
+from typing import Any
 
 from sqlmodel import Session, select
 
@@ -87,8 +88,13 @@ class Notifier:
         return _unique(addresses)
 
     def detail_url(self, cert: Certificate) -> str:
-        """Absolute link to a certificate's page."""
-        return f"{self._settings.base_url.rstrip('/')}/certificates/{cert.id}"
+        """Absolute link to a certificate's page, or to the board.
+
+        The unsaved stand-in used to preview a notification has no id, and a
+        link to a record that does not exist would be worse than none.
+        """
+        base = self._settings.base_url.rstrip("/")
+        return f"{base}/certificates/{cert.id}" if cert.id else base
 
     # -- expiry notifications -------------------------------------------
 
@@ -366,17 +372,28 @@ class Notifier:
             self._settings,
         )
 
-    async def send_test_card(self, app_settings: AppSettings) -> None:
-        """Prove the Teams webhook works.
+    async def send_test_card(self, cert: Certificate, app_settings: AppSettings) -> int:
+        """Send a real-shaped card and return the status Teams replied with.
+
+        A 2xx means the webhook accepted the request. With a Workflows
+        webhook that is a ``202`` returned before the flow itself runs, so it
+        is not proof that a card reached the channel.
 
         Raises:
             DeliveryError: if the webhook rejected the card.
         """
-        await teams_channel.post_card(
+        return await teams_channel.post_card(
             app_settings.teams_webhook_url,
-            teams_channel.build_test_card(
-                "If you can read this, certificate reminders will appear in this channel."
-            ),
+            self.build_test_payload(cert, app_settings),
+        )
+
+    def build_test_payload(self, cert: Certificate, app_settings: AppSettings) -> dict[str, Any]:
+        """The exact JSON the test posts, so the settings page can show it."""
+        return teams_channel.build_test_card(
+            cert,
+            cert.days_left(),
+            detail_url=self.detail_url(cert),
+            contact_line=app_settings.contact_line,
         )
 
     async def send_test_invite(self, to: str, cert: Certificate, app_settings: AppSettings) -> None:

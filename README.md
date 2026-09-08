@@ -209,6 +209,17 @@ In Teams, on the channel you want: **Workflows → "Post to a channel when a
 webhook request is received"**. Create it, copy the URL, and paste it into
 **Settings → Microsoft Teams**. Then press **Send test Teams card**.
 
+**Read the result carefully.** A Workflows webhook replies `202 Accepted` as
+soon as it has queued the flow run — *before* any of the flow's own steps
+execute. So a 202 proves the URL is live and the request was accepted; it does
+not prove a card reached the channel. If none appears, the flow ran and failed,
+and its **run history in Power Automate** names the step that broke. The
+settings page shows the exact JSON that is posted, so you can compare it with
+what your flow expects: the card is in `attachments[0].content`.
+
+The test posts the *same* card as a real reminder, with one extra line saying
+it is a test — so if the test renders, real notifications will too.
+
 The URL is a secret. It is stored in the database, never shown again after it
 is saved, and masked in log lines. The retired "Office 365 connector" webhooks
 are not supported — the payload NotAfter sends is an Adaptive Card 1.4.

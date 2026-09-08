@@ -263,6 +263,20 @@ button[disabled] { opacity: 0.5; cursor: not-allowed; }
 .spinner { color: var(--muted); font-size: 0.875rem; }
 .error-text { color: var(--red); font-size: 0.9375rem; }
 
+details { margin: 0.5rem 0 1rem; font-size: 0.9375rem; }
+summary { cursor: pointer; color: var(--muted); }
+summary:hover { color: var(--graphite); }
+.payload {
+  margin: 0.75rem 0 0;
+  padding: 0.75rem;
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  overflow-x: auto;
+  white-space: pre;
+  line-height: 1.5;
+}
+
 /* --- Footer ------------------------------------------------------------ */
 
 footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule); color: var(--muted); font-size: 0.8125rem; }

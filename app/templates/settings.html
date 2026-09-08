@@ -86,6 +86,24 @@
   </form>
 </div>
 
+<h2>What the Teams card looks like</h2>
+<p class="lede">This is exactly what <strong>Send test Teams card</strong> posts to
+the webhook, built from “{{ teams_sample_label }}”. A real reminder is the same
+card without the first line. If your workflow expects a different shape, this is
+what to compare it against.</p>
+{% if last_teams_test %}
+<p class="small">Last test: {{ last_teams_test.at | datetime }} — the webhook replied
+  HTTP {{ last_teams_test.details_json.get('http_status', '2xx') }}.
+  {% if last_teams_test.details_json.get('http_status') == 202 %}
+  A <strong>202</strong> means the workflow queued the run; it does not mean a card
+  reached the channel. If none did, the flow's run history in Power Automate says why.
+  {% endif %}</p>
+{% endif %}
+<details>
+  <summary>Show the JSON that is posted</summary>
+  <pre class="mono payload">{{ teams_payload }}</pre>
+</details>
+
 <h2>How this instance is configured</h2>
 <dl class="facts">
   <dt>Sign-in</dt><dd>{{ env.auth_mode }}{% if env.auth_mode == 'cloudflare' %} — Cloudflare Access team “{{ env.cf_access_team }}”{% endif %}</dd>

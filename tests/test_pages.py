@@ -193,3 +193,64 @@ def test_test_email_button_sends_to_the_signed_in_user(
     assert response.status_code == 303
     assert outbox.mail[-1].to == ["editor@example.org"]
     assert outbox.mail[-1].subject == "NotAfter test email"
+
+
+def test_teams_test_card_is_the_same_shape_as_a_real_one(
+    editor: Client, session: Session, app_settings
+):
+    """A weaker test payload could pass while real notifications failed."""
+    from app.notify.teams import build_card, build_test_card
+    from app.services import sample_certificate
+
+    cert = sample_certificate(session)
+    real = build_card(cert, 30, detail_url="https://x.example.org/1", contact_line="Ask us.")
+    test = build_test_card(cert, 30, detail_url="https://x.example.org/1", contact_line="Ask us.")
+
+    real_content = real["attachments"][0]["content"]
+    test_content = test["attachments"][0]["content"]
+    assert test_content["version"] == real_content["version"]
+    assert test_content["actions"] == real_content["actions"]
+    assert [block["type"] for block in test_content["body"]][1:] == [
+        block["type"] for block in real_content["body"]
+    ]
+    assert "Test message from NotAfter" in test_content["body"][0]["text"]
+
+
+async def test_teams_test_reports_the_status_the_webhook_returned(
+    editor: Client, session: Session, outbox, app_settings, monkeypatch
+):
+    """A 202 means queued, not delivered, so the number has to be visible."""
+    from app.notify import teams as teams_channel
+    from app.services import record_audit  # noqa: F401
+
+    app_settings.teams_webhook_url = "https://example.org/webhook"
+    session.add(app_settings)
+    session.commit()
+
+    async def accepted(webhook_url: str, payload, **_kwargs) -> int:
+        outbox.cards.append(payload)
+        return 202
+
+    monkeypatch.setattr(teams_channel, "post_card", accepted)
+    response = editor.post_form("/settings/test-teams", {}, follow_redirects=False)
+
+    assert response.status_code == 303
+    assert "msg=teams-accepted" in response.headers["location"]
+    assert "http=202" in response.headers["location"]
+
+    entry = session.exec(select(AuditLog).where(AuditLog.target == "teams")).one()
+    assert entry.details_json["http_status"] == 202
+
+    page = editor.get("/settings").text
+    assert "the webhook replied" in page
+    assert "HTTP 202" in page
+    assert "does not mean a card" in page
+
+
+def test_settings_page_shows_the_exact_teams_payload(
+    editor: Client, session: Session, app_settings
+):
+    body = editor.get("/settings").text
+    assert "Show the JSON that is posted" in body
+    assert "application/vnd.microsoft.card.adaptive" in body
+    assert "AdaptiveCard" in body

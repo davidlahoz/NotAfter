@@ -95,31 +95,32 @@ def build_card(
     }
 
 
-def build_test_card(message: str) -> dict[str, Any]:
-    """A small card used by the 'send test Teams card' action."""
-    return {
-        "type": "message",
-        "attachments": [
-            {
-                "contentType": "application/vnd.microsoft.card.adaptive",
-                "contentUrl": None,
-                "content": {
-                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                    "type": "AdaptiveCard",
-                    "version": ADAPTIVE_CARD_VERSION,
-                    "body": [
-                        {
-                            "type": "TextBlock",
-                            "text": "NotAfter test message",
-                            "size": "Large",
-                            "weight": "Bolder",
-                        },
-                        {"type": "TextBlock", "text": message, "wrap": True},
-                    ],
-                },
-            }
-        ],
-    }
+def build_test_card(
+    cert: Certificate,
+    days: int,
+    *,
+    detail_url: str,
+    contact_line: str,
+) -> dict[str, Any]:
+    """The 'send test Teams card' payload.
+
+    Deliberately the *same* card as a real notification, with one line added
+    to say it is a test. A test built from a simpler payload could succeed
+    while the real one failed, which would make it worse than useless.
+    """
+    payload = build_card(cert, days, detail_url=detail_url, contact_line=contact_line)
+    body = payload["attachments"][0]["content"]["body"]
+    body.insert(
+        0,
+        {
+            "type": "TextBlock",
+            "text": "Test message from NotAfter — this is what a reminder looks like.",
+            "wrap": True,
+            "isSubtle": True,
+            "size": "Small",
+        },
+    )
+    return payload
 
 
 async def post_card(
@@ -128,8 +129,15 @@ async def post_card(
     *,
     client: httpx.AsyncClient | None = None,
     max_attempts: int = MAX_ATTEMPTS,
-) -> None:
+) -> int:
     """POST a card, retrying 429 and 5xx responses with a short backoff.
+
+    Returns the HTTP status Teams replied with. Note what that does and does
+    not mean: a Workflows webhook answers ``202 Accepted`` as soon as it has
+    queued the flow, before any of the flow's own steps run. A 202 therefore
+    proves the request arrived and was accepted — not that a card reached the
+    channel. If one never appears, the flow's run history is where the reason
+    is.
 
     Raises:
         DeliveryError: when every attempt failed. The URL is never included.
@@ -151,7 +159,7 @@ async def post_card(
                 last_error = f"the request failed ({type(exc).__name__})"
             else:
                 if response.status_code < 400:
-                    return
+                    return response.status_code
                 last_error = f"Teams replied {response.status_code}"
                 if response.status_code not in (408, 429) and response.status_code < 500:
                     break

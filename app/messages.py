@@ -21,6 +21,12 @@ MESSAGES: Final[dict[str, str]] = {
     "restored": "Certificate restored to the board.",
     "invites-sent": "Calendar invites sent.",
     "test-sent": "Test notification sent.",
+    "teams-accepted": (
+        "The webhook accepted the card. A Teams Workflows webhook replies as "
+        "soon as it has queued the flow, before the flow's own steps run — so "
+        "if no card appears in the channel, open that flow's run history in "
+        "Power Automate to see which step failed."
+    ),
     "settings-saved": "Settings saved.",
     "job-run": "Notification run finished. See the audit trail for what was sent.",
 }
