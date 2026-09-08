@@ -19,7 +19,7 @@ import pytest
 import uvicorn
 from fastapi import FastAPI
 
-from tests.fixtures import make_cert, make_pkcs12
+from tests.fixtures import make_cert, make_pkcs12, make_pkcs12_legacy
 
 playwright_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 
@@ -60,12 +60,18 @@ def live_server(app: FastAPI) -> Iterator[str]:
     server.join(timeout=10)
 
 
+@pytest.mark.parametrize("scheme", ["modern", "legacy"])
 def test_a_pkcs12_is_opened_in_the_page_and_only_pem_is_sent(
-    live_server: str, tmp_path: Any, outbox
+    live_server: str, tmp_path: Any, outbox, scheme: str
 ) -> None:
+    """`legacy` is the Triple DES shape that Windows and keytool produce."""
     cert = make_cert("edi.example.org", days_until_expiry=120)
     pfx_path = tmp_path / "keystore.pfx"
-    pfx_path.write_bytes(make_pkcs12(cert, password=PASSWORD.encode()))
+    pfx_path.write_bytes(
+        make_pkcs12(cert, password=PASSWORD.encode())
+        if scheme == "modern"
+        else make_pkcs12_legacy(cert, PASSWORD.encode())
+    )
 
     sent_bodies: list[bytes] = []
 

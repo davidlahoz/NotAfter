@@ -111,3 +111,20 @@ def make_pkcs12(cert: GeneratedCert, *, password: bytes | None = None) -> bytes:
     return pkcs12.serialize_key_and_certificates(
         b"example", cert.key, cert.certificate, None, encryption
     )
+
+
+def make_pkcs12_legacy(cert: GeneratedCert, password: bytes) -> bytes:
+    """Build a PKCS#12 container using the legacy SHA-1 and Triple DES scheme.
+
+    This is what Windows' ``Export-PfxCertificate``, Java's ``keytool`` and
+    older OpenSSL produce, and it is the shape that the in-browser extraction
+    has to cope with — WebCrypto implements neither Triple DES nor RC2.
+    """
+    builder = (
+        serialization.PrivateFormat.PKCS12.encryption_builder()
+        .key_cert_algorithm(pkcs12.PBES.PBESv1SHA1And3KeyTripleDESCBC)
+        .hmac_hash(hashes.SHA1())  # noqa: S303 — the legacy scheme being reproduced
+    )
+    return pkcs12.serialize_key_and_certificates(
+        b"example", cert.key, cert.certificate, None, builder.build(password)
+    )

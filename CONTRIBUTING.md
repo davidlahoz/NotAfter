@@ -49,6 +49,13 @@ browser test that proves a `.pfx` never leaves the page:
 
 Please run it if you touch anything in `web/src/`.
 
+`tests/test_pfx_extraction.py` runs the same TypeScript through Node against a
+`.pfx` in every encryption scheme — PBES2/AES, the legacy Triple DES one, and
+(where `openssl` can write it) Windows' RC2-40. Those need `npm ci` in `web/`
+and are skipped without it. If you change the extraction, run them: pkijs
+alone silently reports an unreadable scheme as a wrong password, which is a
+mistake worth not repeating.
+
 ## House style
 
 - **Explain, don't blame.** Every error a user can see should say what

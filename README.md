@@ -71,7 +71,10 @@ line for every change.
 2. If it is encrypted, the page asks for the password. That happens in the
    tab; nothing has left your machine yet.
 3. The browser opens only the *certificate bags* of the file. The key bags are
-   skipped — they are never decrypted or read.
+   skipped — they are never decrypted or read. Files from Windows,
+   `keytool` and older OpenSSL use RC2-40 or Triple DES, which browsers have
+   no built-in support for, so those are decrypted in JavaScript by
+   node-forge.
 4. The page shows you what it found and sends the server **only the public
    certificate**, as text.
 5. The file bytes and the password are discarded.
@@ -367,6 +370,14 @@ Choices made while building this, and why.
 - **The built browser bundle is committed to `app/static/`.** The Dockerfile
   rebuilds it from source anyway; committing it means `make dev` and the test
   suite work without Node installed.
+- **pkijs walks the PKCS#12 structure; node-forge decrypts it.** The
+  specification allowed node-forge "if PKCS#12 support is more robust", and it
+  is: pkijs implements only PBES2, so a `.pfx` from Windows, `keytool` or
+  older OpenSSL — RC2-40 or Triple DES, neither of which WebCrypto has —
+  could not be opened at all. Only the blob holding certificate bags is
+  decrypted; the private key bag is encrypted separately and is never passed
+  to the decryptor. Importing forge's individual modules rather than its index
+  keeps 140 KB out of the bundle.
 - **`create_all` at start-up as well as Alembic.** Migrations are what runs in
   the container; `create_all` is what makes a fresh test database. Both derive
   from the same models.

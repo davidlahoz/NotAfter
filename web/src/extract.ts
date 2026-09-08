@@ -8,6 +8,9 @@
  */
 
 import * as asn1js from "asn1js";
+import forge from "node-forge/lib/forge";
+import "node-forge/lib/asn1";
+import "node-forge/lib/pbe";
 import {
   Certificate,
   ContentInfo,
@@ -34,6 +37,16 @@ export class PasswordRequiredError extends Error {
   constructor(message = "This file needs its password.") {
     super(message);
     this.name = "PasswordRequiredError";
+  }
+}
+
+export class UnsupportedEncryption extends Error {
+  readonly oid: string;
+
+  constructor(oid: string, message: string) {
+    super(message);
+    this.name = "UnsupportedEncryption";
+    this.oid = oid;
   }
 }
 
@@ -191,7 +204,7 @@ function parsePkcs7(bytes: Uint8Array): Certificate[] {
  * returned. The password is used only to open the certificate bags, and only
  * inside this function.
  */
-export async function readPkcs12(bytes: Uint8Array, password: string): Promise<Certificate[]> {
+export function readPkcs12(bytes: Uint8Array, password: string): Certificate[] {
   const pfx = PFX.fromBER(toArrayBuffer(bytes));
   const authSafeContent = pfx.authSafe.content;
   if (!(authSafeContent instanceof asn1js.OctetString)) {
@@ -200,15 +213,18 @@ export async function readPkcs12(bytes: Uint8Array, password: string): Promise<C
 
   const authenticatedSafe = AuthenticatedSafe.fromBER(authSafeContent.getValue());
   const certificates: Certificate[] = [];
-  let sawEncryptedBag = false;
+  let refusedPassword = false;
+  let unsupported: UnsupportedEncryption | null = null;
 
   for (const safeContent of authenticatedSafe.safeContents) {
     let contents: SafeContents;
     try {
-      contents = await openSafeContent(safeContent, password);
+      contents = openSafeContent(safeContent, password);
     } catch (error) {
-      sawEncryptedBag = true;
-      void error;
+      // Keep going: the certificates may be in a blob we can open even if
+      // another one defeats us. Remember why, so the message can be honest.
+      if (error instanceof UnsupportedEncryption) unsupported = error;
+      else refusedPassword = true;
       continue;
     }
 
@@ -222,7 +238,17 @@ export async function readPkcs12(bytes: Uint8Array, password: string): Promise<C
   }
 
   if (certificates.length === 0) {
-    if (sawEncryptedBag) throw new PasswordRequiredError();
+    if (unsupported) {
+      throw new ExtractionError(
+        `This .pfx file is encrypted with a method your browser cannot read ` +
+          `(${PKCS12_PBE[unsupported.oid] ?? unsupported.oid}). Export the ` +
+          `certificate on its own instead — on a machine with OpenSSL:\n\n` +
+          `  openssl pkcs12 -in yourfile.pfx -clcerts -nokeys -out certificate.pem\n\n` +
+          `That writes the public certificate only, with no private key, and ` +
+          `you can upload it here.`,
+      );
+    }
+    if (refusedPassword) throw new PasswordRequiredError();
     throw new ExtractionError(
       "No certificate was found in that file. It may contain only a private key.",
     );
@@ -251,7 +277,69 @@ function certificateFromBag(value: unknown): Certificate | null {
   return null;
 }
 
-async function openSafeContent(safeContent: ContentInfo, password: string): Promise<SafeContents> {
+/** PKCS#12 encryption schemes, by the OID that names them in the file. */
+const PBES2 = "1.2.840.113549.1.5.13";
+const PKCS12_PBE: Record<string, string> = {
+  "1.2.840.113549.1.12.1.3": "SHA-1 and 3-key Triple DES",
+  "1.2.840.113549.1.12.1.4": "SHA-1 and 2-key Triple DES",
+  "1.2.840.113549.1.12.1.5": "SHA-1 and 128-bit RC2",
+  "1.2.840.113549.1.12.1.6": "SHA-1 and 40-bit RC2",
+};
+
+/** node-forge speaks binary strings; these convert to and from bytes. */
+function toBinaryString(bytes: Uint8Array): string {
+  let text = "";
+  for (const byte of bytes) text += String.fromCharCode(byte);
+  return text;
+}
+
+function fromBinaryString(text: string): Uint8Array {
+  const bytes = new Uint8Array(text.length);
+  for (let index = 0; index < text.length; index += 1) bytes[index] = text.charCodeAt(index);
+  return bytes;
+}
+
+/**
+ * Decrypt one encrypted SafeContents blob.
+ *
+ * WebCrypto has neither RC2 nor Triple DES, so the legacy PKCS#12 schemes —
+ * which is what Windows, `keytool` and older OpenSSL produce — are done by
+ * node-forge in pure JavaScript. Only the blob holding certificate bags is
+ * ever passed here; a private key bag is encrypted separately and is never
+ * given to this function.
+ */
+function decryptSafeContents(encrypted: EncryptedData, password: string): Uint8Array {
+  const info = encrypted.encryptedContentInfo;
+  const oid = info.contentEncryptionAlgorithm.algorithmId;
+  const isPkcs12Pbe = oid in PKCS12_PBE;
+  if (oid !== PBES2 && !isPkcs12Pbe) {
+    throw new UnsupportedEncryption(
+      oid,
+      "This .pfx file is encrypted with a method this app cannot read.",
+    );
+  }
+
+  const parameters = info.contentEncryptionAlgorithm.algorithmParams;
+  if (!parameters) {
+    throw new ExtractionError("This .pfx file is missing its encryption settings.");
+  }
+
+  // PKCS#12's own schemes derive the key from the password as a BMPString,
+  // which forge does itself; PBES2 uses the UTF-8 bytes.
+  const secret = isPkcs12Pbe ? password : forge.util.encodeUtf8(password);
+  const decipher = forge.pki.pbe.getCipher(
+    oid,
+    forge.asn1.fromDer(toBinaryString(new Uint8Array(parameters.toBER(false)))),
+    secret,
+  );
+  decipher.update(forge.util.createBuffer(toBinaryString(new Uint8Array(info.getEncryptedContent()))));
+  if (!decipher.finish()) {
+    throw new PasswordRequiredError();
+  }
+  return fromBinaryString(decipher.output.getBytes());
+}
+
+function openSafeContent(safeContent: ContentInfo, password: string): SafeContents {
   if (safeContent.contentType === "1.2.840.113549.1.7.1") {
     const content = safeContent.content;
     if (content instanceof asn1js.OctetString) {
@@ -261,16 +349,9 @@ async function openSafeContent(safeContent: ContentInfo, password: string): Prom
   }
   if (safeContent.contentType === "1.2.840.113549.1.7.6") {
     const encrypted = new EncryptedData({ schema: safeContent.content });
-    const decrypted = await encrypted.decrypt({
-      password: passwordToBuffer(password),
-    });
-    return SafeContents.fromBER(decrypted);
+    return SafeContents.fromBER(toArrayBuffer(decryptSafeContents(encrypted, password)));
   }
   throw new ExtractionError("This .pfx file uses a container this app cannot read.");
-}
-
-function passwordToBuffer(password: string): ArrayBuffer {
-  return toArrayBuffer(new TextEncoder().encode(password));
 }
 
 /** Every certificate found in a file, whatever its format. */
