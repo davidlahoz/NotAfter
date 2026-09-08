@@ -121,3 +121,18 @@ def fingerprint_groups(fingerprint: str) -> list[str]:
     pair. Joining them with a colon gives the usual display form.
     """
     return [fingerprint[index : index + 2].upper() for index in range(0, len(fingerprint), 2)]
+
+
+#: Characters that have no place in a label, a name or an address, and that
+#: break the things those values are later put into — mail headers above all.
+_CONTROL = dict.fromkeys(range(32)) | {127: None}
+
+
+def clean_text(value: str, *, limit: int = 200) -> str:
+    """Strip control characters and trim a free-text field to a sane length.
+
+    Applied where text enters the application rather than where it is used:
+    by the time a label reaches a mail header it is too late to find out that
+    it contains a newline.
+    """
+    return value.translate(_CONTROL).strip()[:limit]

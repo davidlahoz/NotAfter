@@ -85,6 +85,8 @@ def test_settings(tmp_path: Any) -> Settings:
         email_from="noafter@example.org",
         email_from_name="No After",
         scheduler_enabled=False,
+        # The suite posts to a stand-in host, so it must be allowed here.
+        teams_webhook_allowed_hosts=".logic.azure.com,example.org",
     )
 
 

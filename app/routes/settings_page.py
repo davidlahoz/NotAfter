@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Annotated
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from sqlmodel import Session, col, desc, select
 from starlette.responses import HTMLResponse
@@ -13,6 +13,7 @@ from starlette.responses import HTMLResponse
 from app.auth import User
 from app.config import Settings
 from app.db import load_app_settings
+from app.formatting import clean_text
 from app.jobs import last_job_run
 from app.models import (
     DEFAULT_THRESHOLDS,
@@ -24,6 +25,7 @@ from app.models import (
     utcnow,
 )
 from app.notify import DeliveryError
+from app.notify.teams import WebhookNotAllowed, validate_webhook_url
 from app.routes.deps import DbSession, Editor, get_config, get_notifier
 from app.security import Rate, limiter
 from app.services import list_certificates, record_audit, sample_certificate
@@ -37,7 +39,7 @@ WEBHOOK_UNCHANGED = "keep"
 def _split(value: str) -> list[str]:
     """Split a textarea or comma-separated field into addresses."""
     parts = value.replace("\n", ",").replace(";", ",").split(",")
-    return [part.strip() for part in parts if part.strip()]
+    return [cleaned for part in parts if (cleaned := clean_text(part))]
 
 
 def _parse_days(value: str, *, default: list[int]) -> list[int]:
@@ -97,7 +99,7 @@ def settings_page(
             ),
             "teams_sample_label": sample.label,
             "last_teams_test": _last_teams_test(session),
-            "env": get_config(),
+            "env": get_config(request),
             "problems": problems,
             "cert_labels": labels,
             "last_run": last_job_run(session),
@@ -129,7 +131,7 @@ async def save_settings(
     The webhook URL is only replaced when a new one is typed, so that the
     stored secret is never echoed back into the page.
     """
-    _rate_limit(user, get_config())
+    _rate_limit(user, get_config(request))
     app_settings = load_app_settings(session)
 
     app_settings.recipient_emails = _split(recipient_emails)
@@ -137,7 +139,17 @@ async def save_settings(
     if remove_webhook:
         app_settings.teams_webhook_url = ""
     elif teams_webhook_url.strip():
-        app_settings.teams_webhook_url = teams_webhook_url.strip()
+        candidate = teams_webhook_url.strip()
+        # Refused here as well as at send time, so the person who typed it
+        # finds out now rather than when a notification silently fails.
+        try:
+            validate_webhook_url(candidate, get_config(request).teams_host_suffixes)
+        except WebhookNotAllowed as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "webhook_not_allowed", "message": exc.message},
+            ) from exc
+        app_settings.teams_webhook_url = candidate
     app_settings.thresholds = _parse_thresholds(thresholds)
     app_settings.notify_daily_when_expired = bool(notify_daily_when_expired)
     app_settings.expired_teams_every_hours = min(max(expired_teams_every_hours, 0), 24)
@@ -152,7 +164,7 @@ async def save_settings(
     app_settings.calendar_alarm_days = _parse_days(calendar_alarm_days, default=[7, 1])
     app_settings.warn_days = max(warn_days, critical_days)
     app_settings.critical_days = min(warn_days, critical_days)
-    app_settings.contact_line = contact_line.strip() or app_settings.contact_line
+    app_settings.contact_line = clean_text(contact_line, limit=300) or app_settings.contact_line
     app_settings.updated_at = utcnow()
     session.add(app_settings)
     session.commit()
@@ -219,9 +231,9 @@ async def test_email(
     user: User = Editor,
 ) -> RedirectResponse:
     """Send a test email to the signed-in user."""
-    _rate_limit(user, get_config())
+    _rate_limit(user, get_config(request))
     app_settings = load_app_settings(session)
-    if not get_config().email_configured:
+    if not get_config(request).email_configured:
         return RedirectResponse("/settings?err=smtp-unconfigured", status_code=303)
     try:
         await get_notifier(request).send_test_email(user.email, app_settings)
@@ -239,7 +251,7 @@ async def test_teams(
     user: User = Editor,
 ) -> RedirectResponse:
     """Post a test card to the configured Teams webhook."""
-    _rate_limit(user, get_config())
+    _rate_limit(user, get_config(request))
     app_settings = load_app_settings(session)
     if not app_settings.teams_webhook_url:
         return RedirectResponse("/settings?err=no-teams", status_code=303)
@@ -260,9 +272,9 @@ async def test_invite(
     user: User = Editor,
 ) -> RedirectResponse:
     """Send the signed-in user a sample calendar invite."""
-    _rate_limit(user, get_config())
+    _rate_limit(user, get_config(request))
     app_settings = load_app_settings(session)
-    if not get_config().email_configured:
+    if not get_config(request).email_configured:
         return RedirectResponse("/settings?err=smtp-unconfigured", status_code=303)
 
     sample = session.exec(select(Certificate).limit(1)).first()

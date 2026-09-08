@@ -9,7 +9,10 @@ error message.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
+from ipaddress import ip_address
 from typing import Any, Final
+from urllib.parse import urlparse
 
 import httpx
 
@@ -142,12 +145,58 @@ def build_test_card(
     return payload
 
 
+class WebhookNotAllowed(DeliveryError):
+    """The webhook URL does not point where a Teams webhook should."""
+
+
+def validate_webhook_url(url: str, allowed_suffixes: Sequence[str]) -> None:
+    """Refuse a webhook the server should not be making requests to.
+
+    The URL comes from whoever can edit the settings, and the server then
+    fetches it. Without this, that is a way to have the server reach hosts
+    the person cannot — cloud metadata, another container, an internal admin
+    port — and the reply's status code comes back to them as an error
+    message, which is enough to map what is listening.
+
+    Raises:
+        WebhookNotAllowed: with a message naming what is wrong.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        raise WebhookNotAllowed(
+            "A Teams webhook URL must start with https://. "
+            f"This one starts with {parsed.scheme or 'nothing'}://."
+        )
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise WebhookNotAllowed("That webhook URL has no hostname.")
+
+    try:
+        address = ip_address(host)
+    except ValueError:
+        address = None
+    if address is not None:
+        raise WebhookNotAllowed("A Teams webhook URL names a Microsoft host, not an IP address.")
+
+    if allowed_suffixes and not any(
+        host == suffix.lstrip(".") or host.endswith(suffix) for suffix in allowed_suffixes
+    ):
+        allowed = ", ".join(allowed_suffixes)
+        raise WebhookNotAllowed(
+            f"That webhook points at {host}, which is not a Microsoft "
+            f"workflow host. Expected one ending in: {allowed}. Copy the URL "
+            "from the Teams workflow itself, or widen "
+            "TEAMS_WEBHOOK_ALLOWED_HOSTS if you relay through your own host."
+        )
+
+
 async def post_card(
     webhook_url: str,
     payload: dict[str, Any],
     *,
     client: httpx.AsyncClient | None = None,
     max_attempts: int = MAX_ATTEMPTS,
+    allowed_suffixes: Sequence[str] = (),
 ) -> int:
     """POST a card, retrying 429 and 5xx responses with a short backoff.
 
@@ -166,6 +215,9 @@ async def post_card(
             "No Teams webhook is configured. Add a Workflows webhook URL on "
             "the settings page, or turn Teams notifications off."
         )
+    # Checked again here, not only where it is saved: a value that reached the
+    # database another way must still not be fetched.
+    validate_webhook_url(webhook_url, allowed_suffixes)
 
     owns_client = client is None
     http = client or httpx.AsyncClient(timeout=20.0)

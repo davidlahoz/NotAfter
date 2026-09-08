@@ -6,7 +6,7 @@ from fastapi import Depends, HTTPException, Request, UploadFile, status
 from sqlmodel import Session
 
 from app.auth import User, current_user, require_editor
-from app.config import Settings, get_settings
+from app.config import Settings
 from app.db import get_session
 from app.models import Certificate
 from app.notifier import Notifier
@@ -23,9 +23,16 @@ def get_notifier(request: Request) -> Notifier:
     return notifier
 
 
-def get_config() -> Settings:
-    """Environment settings, as a dependency for easy overriding in tests."""
-    return get_settings()
+def get_config(request: Request) -> Settings:
+    """The settings this application was built with.
+
+    Read from the application rather than from the process, so that what a
+    route enforces cannot drift from what the app was configured with — an
+    upload limit checked against one value and enforced against another is
+    not a limit.
+    """
+    config: Settings = request.app.state.settings
+    return config
 
 
 def load_certificate(cert_id: int, session: Session = DbSession) -> Certificate:

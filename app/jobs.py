@@ -135,15 +135,25 @@ async def run_daily_job(
             if plan.days < 0 and app_settings.expired_teams_every_hours
             else channels
         )
-        outcomes = await notifier.notify_expiry(
-            session,
-            cert,
-            days=plan.days,
-            threshold=plan.threshold,
-            dedupe_key=plan.dedupe_key,
-            app_settings=app_settings,
-            channels=due_channels,
-        )
+        try:
+            outcomes = await notifier.notify_expiry(
+                session,
+                cert,
+                days=plan.days,
+                threshold=plan.threshold,
+                dedupe_key=plan.dedupe_key,
+                app_settings=app_settings,
+                channels=due_channels,
+            )
+        except Exception as exc:  # one record must not stop the rest
+            # A single unusable record used to abort the whole run, so every
+            # certificate after it went unnotified and nobody was told.
+            session.rollback()
+            failures += 1
+            problems.append(f"{cert.label}: {type(exc).__name__}")
+            logger.exception("notification failed for certificate %s", cert.id)
+            continue
+
         for outcome in outcomes:
             if outcome.status is DeliveryStatus.SENT:
                 sent += 1
@@ -209,15 +219,23 @@ async def run_expiry_escalation(
         ]
         key = expired_hour_key(moment, every_hours)
         for cert in expired:
-            outcomes = await notifier.notify_expiry(
-                session,
-                cert,
-                days=cert.days_left(moment.date()),
-                threshold=EXPIRED_DAILY_THRESHOLD,
-                dedupe_key=key,
-                app_settings=app_settings,
-                channels=[Channel.TEAMS],
-            )
+            try:
+                outcomes = await notifier.notify_expiry(
+                    session,
+                    cert,
+                    days=cert.days_left(moment.date()),
+                    threshold=EXPIRED_DAILY_THRESHOLD,
+                    dedupe_key=key,
+                    app_settings=app_settings,
+                    channels=[Channel.TEAMS],
+                )
+            except Exception as exc:  # see run_daily_job
+                session.rollback()
+                failures += 1
+                problems.append(f"{cert.label}: {type(exc).__name__}")
+                logger.exception("escalation failed for certificate %s", cert.id)
+                continue
+
             for outcome in outcomes:
                 if outcome.status is DeliveryStatus.SENT:
                     sent += 1

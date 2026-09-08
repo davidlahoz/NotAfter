@@ -12,6 +12,7 @@ from typing import Any
 from sqlmodel import Session, col, select
 
 from app.auth import User
+from app.formatting import clean_text
 from app.models import (
     AuditLog,
     Certificate,
@@ -146,10 +147,10 @@ def create_from_facts(
         return existing, False
 
     cert = Certificate(
-        label=label.strip(),
-        environment=environment.strip(),
-        owner_email=owner_email.strip(),
-        notes=notes.strip(),
+        label=clean_text(label),
+        environment=clean_text(environment, limit=60),
+        owner_email=clean_text(owner_email),
+        notes=clean_text(notes, limit=2000),
         source=CertSource.UPLOAD,
         verified=True,
         subject_cn=facts.subject_cn,
@@ -197,14 +198,14 @@ def create_manual(
 ) -> Certificate:
     """Register an expiry date typed in by hand, marked unverified."""
     cert = Certificate(
-        label=label.strip(),
-        environment=environment.strip(),
-        owner_email=owner_email.strip(),
-        notes=notes.strip(),
+        label=clean_text(label),
+        environment=clean_text(environment, limit=60),
+        owner_email=clean_text(owner_email),
+        notes=clean_text(notes, limit=2000),
         source=CertSource.MANUAL,
         verified=False,
-        subject_cn=subject_cn.strip(),
-        issuer_rfc4514=issuer.strip(),
+        subject_cn=clean_text(subject_cn),
+        issuer_rfc4514=clean_text(issuer),
         not_after=not_after,
         created_by=actor.email,
     )
@@ -365,9 +366,9 @@ def update_details(
     changed = {
         name: value
         for name, value in (
-            ("label", label.strip()),
-            ("environment", environment.strip()),
-            ("owner_email", owner_email.strip()),
+            ("label", clean_text(label)),
+            ("environment", clean_text(environment, limit=60)),
+            ("owner_email", clean_text(owner_email)),
             ("muted", muted),
             ("recipients_replace_defaults", recipients_replace_defaults),
             ("reminder_days", reminder_days),
@@ -376,11 +377,13 @@ def update_details(
         )
         if getattr(cert, name) != value
     }
-    cert.label = label.strip()
-    cert.environment = environment.strip()
-    cert.owner_email = owner_email.strip()
-    cert.notes = notes.strip()
-    cert.extra_recipients = [address.strip() for address in extra_recipients if address.strip()]
+    cert.label = clean_text(label)
+    cert.environment = clean_text(environment, limit=60)
+    cert.owner_email = clean_text(owner_email)
+    cert.notes = clean_text(notes, limit=2000)
+    cert.extra_recipients = [
+        cleaned for address in extra_recipients if (cleaned := clean_text(address))
+    ]
     cert.recipients_replace_defaults = recipients_replace_defaults
     cert.muted = muted
     cert.reminder_days = reminder_days
@@ -404,7 +407,7 @@ def archive(session: Session, actor: User, cert: Certificate, reason: str) -> Ce
         raise ServiceError("That certificate is already archived.")
     cert.status = CertStatus.ARCHIVED
     cert.archived_at = utcnow()
-    cert.archive_reason = reason.strip()
+    cert.archive_reason = clean_text(reason)
     cert.updated_at = utcnow()
     session.add(cert)
     session.commit()

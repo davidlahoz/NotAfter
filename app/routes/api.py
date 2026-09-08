@@ -12,7 +12,8 @@ from app import __version__
 from app.auth import User
 from app.config import Settings
 from app.jobs import NotificationScheduler, last_job_run, run_daily_job
-from app.routes.deps import DbSession, Editor, get_notifier
+from app.routes.deps import DbSession, Editor, get_config, get_notifier
+from app.security import Rate, limiter
 from app.services import record_audit
 
 router = APIRouter(tags=["operations"])
@@ -35,7 +36,6 @@ def healthz(request: Request, session: Session = DbSession) -> JSONResponse:
         "email": {
             "provider": config.email_provider,
             "configured": config.email_configured,
-            "problems": config.email_warnings,
         },
         "scheduler": {
             "running": bool(scheduler and scheduler.running),
@@ -46,6 +46,10 @@ def healthz(request: Request, session: Session = DbSession) -> JSONResponse:
             if scheduler and scheduler.next_escalation_time
             else None,
         },
+        # Counts only. `detail` names certificates and quotes provider
+        # errors, and this endpoint is deliberately unauthenticated so the
+        # container can call it; the settings page shows the detail to people
+        # who have signed in.
         "last_job": None
         if run is None
         else {
@@ -55,7 +59,6 @@ def healthz(request: Request, session: Session = DbSession) -> JSONResponse:
             "notifications_sent": run.notifications_sent,
             "failures": run.failures,
             "ok": run.ok,
-            "detail": run.detail,
         },
     }
     if (run is not None and not run.ok) or not config.email_configured:
@@ -73,6 +76,9 @@ async def run_job_now(
 
     Idempotent: anything already sent stays sent, and nothing is sent twice.
     """
+    # A run reaches every provider this app talks to, so it is throttled like
+    # any other action that sends something.
+    limiter.check("settings", user.email, Rate.parse(get_config(request).settings_rate_limit))
     run = await run_daily_job(session, get_notifier(request), trigger=f"manual:{user.email}")
     record_audit(
         session,

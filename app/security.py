@@ -16,6 +16,7 @@ from hashlib import sha256
 from typing import Final
 
 from fastapi import HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
 from starlette.types import ASGIApp
@@ -139,6 +140,37 @@ async def csrf_protect(request: Request) -> None:
     if request.url.path == "/healthz":
         return
     await verify_csrf(request, request.app.state.settings.secret_key)
+
+
+class BodySizeLimitMiddleware(BaseHTTPMiddleware):
+    """Refuse an oversized request before any of it is parsed.
+
+    The CSRF check has to read the form to find the token, which means the
+    multipart parser runs — and spools to disk — before the endpoint's own
+    size check, and before authentication. Content-Length is checked here so
+    that neither happens.
+    """
+
+    def __init__(self, app: ASGIApp, *, limit: int) -> None:
+        super().__init__(app)
+        self._limit = limit
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        """Reject on Content-Length; the ASGI server caps the rest."""
+        declared = request.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > self._limit:
+            return JSONResponse(
+                {
+                    "code": "too_large",
+                    "message": (
+                        f"That request is larger than the "
+                        f"{self._limit // 1024} KB limit. A certificate is only "
+                        "a few kilobytes."
+                    ),
+                },
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
+        return await call_next(request)
 
 
 class CsrfCookieMiddleware(BaseHTTPMiddleware):

@@ -309,7 +309,8 @@ def test_healthz_reports_email_as_degraded_but_serves(editor: Client, monkeypatc
     body = editor.get("/healthz").json()
     assert body["status"] == "degraded"
     assert body["email"]["configured"] is False
-    assert "RESEND_API_KEY" in body["email"]["problems"][0]
+    # The reason belongs behind authentication, not in a public healthcheck.
+    assert "problems" not in body["email"]
 
     settings_page = editor.get("/settings").text
     assert "Not working." in settings_page

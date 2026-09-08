@@ -140,7 +140,7 @@ async def register_certificate(
     The body carries a PEM certificate only; anything else is refused by the
     same gate that guards the file upload path.
     """
-    settings = get_config()
+    settings = get_config(request)
     _rate_limit(user, settings)
     facts = _parse_or_400(payload.pem.encode("utf-8"), settings)
     cert, created = create_from_facts(
@@ -180,7 +180,7 @@ async def register_upload(
     Accepts PEM, DER and PKCS#7 only. A PKCS#12 file is refused here with
     guidance, because the server never opens one.
     """
-    settings = get_config()
+    settings = get_config(request)
     _rate_limit(user, settings)
     try:
         data = await read_upload(file, settings)
@@ -218,7 +218,7 @@ async def register_manual(
     user: User = Editor,
 ) -> RedirectResponse:
     """Record an expiry date typed in by hand."""
-    settings = get_config()
+    settings = get_config(request)
     _rate_limit(user, settings)
     try:
         not_after = datetime.combine(date.fromisoformat(expiry_date.strip()), time.min)
@@ -331,6 +331,7 @@ async def update_certificate(
     An empty schedule field means "use the global setting", so a certificate
     only differs where somebody has said it should.
     """
+    _rate_limit(user, get_config(request))
     cert = load_certificate(cert_id, session)
     app_settings = load_app_settings(session)
     before = (
@@ -398,6 +399,7 @@ async def archive_certificate(
     user: User = Editor,
 ) -> RedirectResponse:
     """Archive a record and withdraw its calendar events."""
+    _rate_limit(user, get_config(request))
     cert = load_certificate(cert_id, session)
     try:
         archive(session, user, cert, reason)
@@ -418,6 +420,7 @@ async def restore_certificate(
     user: User = Editor,
 ) -> RedirectResponse:
     """Put an archived record back on the board and re-send its invites."""
+    _rate_limit(user, get_config(request))
     cert = load_certificate(cert_id, session)
     restore(session, user, cert)
     await get_notifier(request).send_invites(session, cert, load_app_settings(session))
@@ -463,7 +466,7 @@ async def attach_upload(
     user: User = Editor,
 ) -> RedirectResponse:
     """Upgrade a manual record by attaching the real certificate."""
-    settings = get_config()
+    settings = get_config(request)
     _rate_limit(user, settings)
     cert = load_certificate(cert_id, session)
     try:
@@ -485,7 +488,7 @@ async def attach_json(
     user: User = Editor,
 ) -> JSONResponse:
     """Attach a browser-extracted certificate to a manual record."""
-    settings = get_config()
+    settings = get_config(request)
     _rate_limit(user, settings)
     cert = load_certificate(cert_id, session)
     facts = _parse_or_400(payload.pem.encode("utf-8"), settings)
@@ -531,7 +534,7 @@ async def renew_upload(
     user: User = Editor,
 ) -> RedirectResponse:
     """Replace a certificate with its successor (file upload path)."""
-    settings = get_config()
+    settings = get_config(request)
     _rate_limit(user, settings)
     old = load_certificate(cert_id, session)
     try:
@@ -553,7 +556,7 @@ async def renew_json(
     user: User = Editor,
 ) -> JSONResponse:
     """Replace a certificate with its successor (browser extraction path)."""
-    settings = get_config()
+    settings = get_config(request)
     _rate_limit(user, settings)
     old = load_certificate(cert_id, session)
     facts = _parse_or_400(payload.pem.encode("utf-8"), settings)
@@ -576,6 +579,7 @@ async def send_test_notification(
     user: User = Editor,
 ) -> RedirectResponse:
     """Send this certificate's notification to the signed-in user, now."""
+    _rate_limit(user, get_config(request))
     cert = load_certificate(cert_id, session)
     app_settings = load_app_settings(session)
     notifier: Notifier = get_notifier(request)
@@ -594,7 +598,7 @@ async def send_test_notification(
             email_channel.Message(
                 to=[user.email], subject=f"[test] {subject}", text=text, html_body=html_body
             ),
-            get_config(),
+            get_config(request),
         )
     except DeliveryError:
         return RedirectResponse(f"/certificates/{cert_id}?err=send-failed", status_code=303)
@@ -616,6 +620,7 @@ async def resend_invites(
     user: User = Editor,
 ) -> RedirectResponse:
     """Send both calendar events again, with an incremented SEQUENCE."""
+    _rate_limit(user, get_config(request))
     cert = load_certificate(cert_id, session)
     await get_notifier(request).send_invites(session, cert, load_app_settings(session))
     record_audit(

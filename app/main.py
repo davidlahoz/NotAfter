@@ -23,7 +23,12 @@ from app.jobs import NotificationScheduler
 from app.logging_setup import configure_logging, logger, redact
 from app.notifier import Notifier
 from app.routes import api, audit_page, board, certificates, settings_page
-from app.security import CsrfCookieMiddleware, SecurityHeadersMiddleware, csrf_protect
+from app.security import (
+    BodySizeLimitMiddleware,
+    CsrfCookieMiddleware,
+    SecurityHeadersMiddleware,
+    csrf_protect,
+)
 from app.templating import render
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -85,6 +90,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.auth_provider = build_provider(settings)
     application.state.notifier = Notifier(settings)
 
+    # Outermost after the header middleware: nothing should parse a body
+    # this large, including the CSRF check.
+    application.add_middleware(
+        BodySizeLimitMiddleware,
+        limit=settings.max_upload_bytes + 64 * 1024,
+    )
     application.add_middleware(
         CsrfCookieMiddleware,
         secret=settings.secret_key,

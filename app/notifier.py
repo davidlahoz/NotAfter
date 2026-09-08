@@ -201,7 +201,11 @@ class Notifier:
             critical_days=app_settings.critical_days,
             repeat_hours=(app_settings.expired_teams_every_hours if days < 0 else 0),
         )
-        await teams_channel.post_card(app_settings.teams_webhook_url, card)
+        await teams_channel.post_card(
+            app_settings.teams_webhook_url,
+            card,
+            allowed_suffixes=self._settings.teams_host_suffixes,
+        )
 
     async def _deliver(
         self,
@@ -444,6 +448,7 @@ class Notifier:
         return await teams_channel.post_card(
             app_settings.teams_webhook_url,
             self.build_test_payload(cert, app_settings),
+            allowed_suffixes=self._settings.teams_host_suffixes,
         )
 
     def build_test_payload(self, cert: Certificate, app_settings: AppSettings) -> dict[str, Any]:

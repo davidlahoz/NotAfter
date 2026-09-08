@@ -74,4 +74,7 @@ HEALTHCHECK --interval=60s --timeout=10s --start-period=15s --retries=3 \
   CMD ["python", "-c", "import urllib.request,sys; r=urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=8); sys.exit(0 if r.status==200 else 1)"]
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["uvicorn", "app.main:build", "--factory", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+# No --proxy-headers: nothing here trusts a forwarded header. Links are built
+# from BASE_URL, and rate limiting is keyed on the identity in the Access
+# token, not on a client address that a caller could set for themselves.
+CMD ["uvicorn", "app.main:build", "--factory", "--host", "0.0.0.0", "--port", "8000"]

@@ -88,6 +88,12 @@ class Settings(BaseSettings):
     smtp_from: str = ""
     smtp_from_name: str = ""
 
+    #: Hosts a Teams webhook may point at. The URL is supplied by an editor
+    #: and the server then makes a request to it, so without a list this is a
+    #: way to have the server reach internal addresses on their behalf.
+    #: Suffix match on the hostname; comma-separated; empty allows anything.
+    teams_webhook_allowed_hosts: str = ".logic.azure.com,.azure-apihub.net,.powerplatform.com"
+
     # --- Limits ---------------------------------------------------------
     max_upload_bytes: int = 256 * 1024
     upload_rate_limit: str = "20/hour"
@@ -105,6 +111,15 @@ class Settings(BaseSettings):
             msg = f"DAILY_RUN_TIME out of range: {value!r}"
             raise ValueError(msg)
         return value
+
+    @property
+    def teams_host_suffixes(self) -> tuple[str, ...]:
+        """Allowed webhook host suffixes, lower-cased."""
+        return tuple(
+            item.strip().lower()
+            for item in self.teams_webhook_allowed_hosts.split(",")
+            if item.strip()
+        )
 
     @property
     def editor_email_set(self) -> frozenset[str]:
