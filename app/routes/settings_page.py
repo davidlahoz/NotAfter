@@ -16,6 +16,7 @@ from app.db import load_app_settings
 from app.jobs import last_job_run
 from app.models import (
     DEFAULT_THRESHOLDS,
+    AppSettings,
     AuditLog,
     Certificate,
     DeliveryStatus,
@@ -25,7 +26,7 @@ from app.models import (
 from app.notify import DeliveryError
 from app.routes.deps import DbSession, Editor, get_config, get_notifier
 from app.security import Rate, limiter
-from app.services import record_audit, sample_certificate
+from app.services import list_certificates, record_audit, sample_certificate
 from app.templating import render
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -37,6 +38,15 @@ def _split(value: str) -> list[str]:
     """Split a textarea or comma-separated field into addresses."""
     parts = value.replace("\n", ",").replace(";", ",").split(",")
     return [part.strip() for part in parts if part.strip()]
+
+
+def _parse_days(value: str, *, default: list[int]) -> list[int]:
+    """Read a list of day counts, largest first, ignoring anything else."""
+    numbers = sorted(
+        {int(part) for part in _split(value) if part.isdigit() and int(part) > 0},
+        reverse=True,
+    )
+    return numbers or default
 
 
 def _parse_thresholds(value: str) -> list[int]:
@@ -106,6 +116,8 @@ async def save_settings(
     thresholds: Annotated[str, Form()] = "",
     notify_daily_when_expired: Annotated[str, Form()] = "",
     expired_teams_every_hours: Annotated[int, Form()] = 1,
+    calendar_renew_lead_days: Annotated[int, Form()] = 30,
+    calendar_alarm_days: Annotated[str, Form()] = "",
     warn_days: Annotated[int, Form()] = 60,
     critical_days: Annotated[int, Form()] = 30,
     contact_line: Annotated[str, Form()] = "",
@@ -129,6 +141,15 @@ async def save_settings(
     app_settings.thresholds = _parse_thresholds(thresholds)
     app_settings.notify_daily_when_expired = bool(notify_daily_when_expired)
     app_settings.expired_teams_every_hours = min(max(expired_teams_every_hours, 0), 24)
+
+    # Calendar timings. Remember the old ones: changing them has no effect on
+    # invites people already hold unless those invites are re-issued.
+    previous_timings = (
+        app_settings.calendar_renew_lead_days,
+        list(app_settings.calendar_alarm_days),
+    )
+    app_settings.calendar_renew_lead_days = min(max(calendar_renew_lead_days, 0), 3650)
+    app_settings.calendar_alarm_days = _parse_days(calendar_alarm_days, default=[7, 1])
     app_settings.warn_days = max(warn_days, critical_days)
     app_settings.critical_days = min(warn_days, critical_days)
     app_settings.contact_line = contact_line.strip() or app_settings.contact_line
@@ -152,7 +173,43 @@ async def save_settings(
             "critical_days": app_settings.critical_days,
         },
     )
+    changed_timings = previous_timings != (
+        app_settings.calendar_renew_lead_days,
+        list(app_settings.calendar_alarm_days),
+    )
+    if changed_timings:
+        updated = await _reissue_invites(request, session, app_settings)
+        record_audit(
+            session,
+            user,
+            "calendar.retimed",
+            "settings",
+            {
+                "renew_lead_days": app_settings.calendar_renew_lead_days,
+                "alarm_days": app_settings.calendar_alarm_days,
+                "certificates_updated": updated,
+            },
+        )
+        return RedirectResponse("/settings?msg=calendar-retimed", status_code=303)
     return RedirectResponse("/settings?msg=settings-saved", status_code=303)
+
+
+async def _reissue_invites(request: Request, session: Session, app_settings: AppSettings) -> int:
+    """Re-send every active certificate's invites with the new timing.
+
+    A calendar client only moves an event when it receives an update for the
+    same UID with a higher SEQUENCE, which is exactly what ``send_invites``
+    produces. Without this the new setting would apply to future
+    registrations only, and quietly disagree with every invite already out
+    there.
+    """
+    notifier = get_notifier(request)
+    updated = 0
+    for cert in list_certificates(session):
+        outcomes = await notifier.send_invites(session, cert, app_settings)
+        if outcomes:
+            updated += 1
+    return updated
 
 
 @router.post("/test-email")

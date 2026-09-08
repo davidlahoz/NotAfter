@@ -28,6 +28,11 @@ MESSAGES: Final[dict[str, str]] = {
         "Power Automate to see which step failed."
     ),
     "settings-saved": "Settings saved.",
+    "calendar-retimed": (
+        "Settings saved, and the calendar invites were re-sent so the events "
+        "people already have move to the new dates. Attendees see an update, "
+        "not a second invitation."
+    ),
     "job-run": "Notification run finished. See the audit trail for what was sent.",
 }
 

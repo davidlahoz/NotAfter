@@ -213,6 +213,12 @@ class AppSettings(SQLModel, table=True):
         sa_column=Column(JSON, nullable=False),
     )
     notify_daily_when_expired: bool = Field(default=True)
+    #: How long before expiry the "renew" calendar event is placed.
+    calendar_renew_lead_days: int = Field(default=30)
+    #: Reminders the attendee's calendar fires, in days before each event.
+    calendar_alarm_days: list[int] = Field(
+        default_factory=lambda: [7, 1], sa_column=Column(JSON, nullable=False)
+    )
     #: While a certificate is expired, repeat the Teams alert this often.
     #: 0 turns the escalation off and leaves Teams on the daily schedule.
     expired_teams_every_hours: int = Field(default=1)

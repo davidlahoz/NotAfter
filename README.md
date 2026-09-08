@@ -88,6 +88,14 @@ tests for each of those cases.
 
 ## How it works
 
+### What you can change without a deploy
+
+Everything about *when* people are told is on the settings page: which days
+before expiry send an email and a Teams card, how far ahead the renewal event
+sits, what alarms attendees get, how often an expired certificate re-alerts
+Teams, and where the amber and red thresholds fall. The only timing fixed by
+the environment is what time of day the job runs (`DAILY_RUN_TIME`).
+
 | Page | Who | What |
 |---|---|---|
 | `/` | everyone | The board: every certificate, soonest expiry first |
@@ -137,10 +145,16 @@ Failures are retried on the next run and shown on the settings page and
 `/healthz`.
 
 **Calendar invites.** Registering a certificate sends two all-day invites: one
-on the expiry date, one 30 days before it, each with reminders 7 days and 1
-day ahead. They have stable UIDs, so replacing or archiving the certificate
-updates or cancels the events people already have in Outlook or Google
-Calendar rather than leaving them behind.
+on the expiry date, and one ahead of it to start the renewal — 30 days by
+default, and the attendee's calendar reminds them 7 days and 1 day before each
+event. All three numbers are on the settings page.
+
+They have stable UIDs, so replacing or archiving the certificate updates or
+cancels the events people already have in Outlook or Google Calendar rather
+than leaving them behind. Changing the timings re-sends the invites for the
+same reason: a calendar only moves an event when it receives an update for
+that UID, so without it the new setting would apply to future registrations
+only and quietly disagree with every invite already out there.
 
 ---
 

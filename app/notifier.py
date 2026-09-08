@@ -297,12 +297,12 @@ class Notifier:
                     cert_id=cert.id or 0,
                     kind=kind,
                     uid=event_uid(cert.id or 0, kind),
-                    event_date=event_date_for(cert, kind),
+                    event_date=event_date_for(cert, kind, app_settings.calendar_renew_lead_days),
                 )
                 session.add(record)
             record.sequence = sequence
             record.method = method
-            record.event_date = event_date_for(cert, kind)
+            record.event_date = event_date_for(cert, kind, app_settings.calendar_renew_lead_days)
             record.recipients = recipients
             record.sent_at = utcnow()
             record.status = status
@@ -331,10 +331,12 @@ class Notifier:
             organizer_name=self._settings.from_name,
             attendees=recipients,
             detail_url=self.detail_url(cert),
+            renew_lead_days=app_settings.calendar_renew_lead_days,
+            alarm_days=app_settings.calendar_alarm_days,
         )
         summary = event_summary(cert, kind)
         verb = "Cancelled" if method is InviteMethod.CANCEL else "Calendar reminder"
-        when = format_date(event_date_for(cert, kind))
+        when = format_date(event_date_for(cert, kind, app_settings.calendar_renew_lead_days))
         text = (
             f"{verb}: {summary}\n\n"
             f"Date: {when}\n"

@@ -6,7 +6,14 @@ import datetime as dt
 
 from sqlmodel import Session, select
 
-from app.models import CalendarInvite, Certificate, CertSource, CertStatus, InviteMethod
+from app.models import (
+    CalendarInvite,
+    Certificate,
+    CertSource,
+    CertStatus,
+    InviteKind,
+    InviteMethod,
+)
 from tests.conftest import Client, Outbox
 from tests.fixtures import make_cert
 
@@ -252,3 +259,111 @@ def test_calendar_identifiers_do_not_follow_the_display_name(
         assert f"UID:cert-{record.id}-" in body
         assert "@notafter" in body
         assert "PRODID:-//NotAfter//" in body
+
+
+# --- Calendar timings are settings, not constants -------------------------
+
+
+def _ics_bodies(outbox: Outbox) -> list[str]:
+    return [invite.calendar.decode() for invite in outbox.invites if invite.calendar]
+
+
+def test_the_renewal_event_follows_the_configured_lead_time(
+    editor: Client, session: Session, outbox: Outbox, app_settings
+):
+    app_settings.calendar_renew_lead_days = 90
+    session.add(app_settings)
+    session.commit()
+
+    _register(editor, make_cert(days_until_expiry=200))
+    cert = _only(session)
+    expiry = cert.not_after.date()
+
+    dates = {
+        invite.kind.value: invite.event_date
+        for invite in session.exec(select(CalendarInvite)).all()
+    }
+    assert dates["expiry"] == expiry
+    assert dates["renew"] == expiry - dt.timedelta(days=90)
+
+    renew_body = next(body for body in _ics_bodies(outbox) if "Renew certificate" in body)
+    assert (expiry - dt.timedelta(days=90)).strftime("%Y%m%d") in renew_body
+    assert "in 90 days" in renew_body.replace("\r\n ", "")
+
+
+def test_the_alarms_follow_the_configured_days(
+    editor: Client, session: Session, outbox: Outbox, app_settings
+):
+    app_settings.calendar_alarm_days = [21, 3]
+    session.add(app_settings)
+    session.commit()
+
+    _register(editor, make_cert(days_until_expiry=200))
+    for body in _ics_bodies(outbox):
+        assert "TRIGGER:-P21D" in body
+        assert "TRIGGER:-P3D" in body
+        assert "TRIGGER:-P7D" not in body
+
+
+async def test_changing_the_timing_moves_invites_people_already_have(
+    editor: Client, session: Session, outbox: Outbox, app_settings
+):
+    """A new setting is useless if it only applies to future registrations."""
+    _register(editor, make_cert(days_until_expiry=200))
+    cert = _only(session)
+    outbox.mail.clear()
+
+    response = editor.post_form(
+        "/settings",
+        {
+            "recipient_emails": "team@example.org",
+            "calendar_recipient_emails": "calendar@example.org",
+            "thresholds": "60, 30",
+            "calendar_renew_lead_days": "45",
+            "calendar_alarm_days": "14, 2",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "msg=calendar-retimed" in response.headers["location"]
+
+    # Re-issued against the same UIDs with a higher SEQUENCE, so calendars
+    # move the existing events instead of showing a second invitation.
+    bodies = _ics_bodies(outbox)
+    assert len(bodies) == 2
+    for body in bodies:
+        assert f"UID:cert-{cert.id}-" in body
+        assert "SEQUENCE:1" in body
+        assert "METHOD:REQUEST" in body
+        assert "TRIGGER:-P14D" in body
+
+    renew = session.exec(
+        select(CalendarInvite).where(CalendarInvite.kind == InviteKind.RENEW)
+    ).one()
+    assert renew.event_date == cert.not_after.date() - dt.timedelta(days=45)
+
+
+async def test_saving_settings_without_touching_the_timing_sends_nothing(
+    editor: Client, session: Session, outbox: Outbox, app_settings
+):
+    _register(editor, make_cert(days_until_expiry=200))
+    outbox.mail.clear()
+
+    response = editor.post_form(
+        "/settings",
+        {
+            "recipient_emails": "someone-else@example.org",
+            "calendar_renew_lead_days": str(app_settings.calendar_renew_lead_days),
+            "calendar_alarm_days": ", ".join(str(day) for day in app_settings.calendar_alarm_days),
+        },
+        follow_redirects=False,
+    )
+    assert "msg=settings-saved" in response.headers["location"]
+    assert outbox.invites == [], "nobody should get an invite for an unrelated change"
+
+
+def test_the_settings_page_offers_both_timings(editor: Client, app_settings):
+    body = editor.get("/settings").text
+    assert "Put the “renew” event this many days before expiry" in body
+    assert "Remind attendees this many days before each event" in body
+    assert "Send an email and a Teams card this many days before expiry" in body
