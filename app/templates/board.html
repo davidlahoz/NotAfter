@@ -7,13 +7,13 @@
   {% for cert in certificates %}{% include "_entry.html" %}{% endfor %}
 </div>
 {% else %}
-<p class="lede">Nothing is registered yet.
+<p class="empty">Nothing is registered yet.
 {% if user and user.is_editor %}<a href="/certificates/new">Register the first certificate</a>.{% else %}
-Ask someone with edit rights to add the first certificate.{% endif %}</p>
+Ask someone with edit rights to add the first one.{% endif %}</p>
 {% endif %}
 
+<h2>What the colours mean</h2>
 <section class="legend">
-  <h2>What the colours mean</h2>
   <dl>
     <dt class="swatch-ok">In date</dt>
     <dd>More than {{ app_settings.warn_days }} days left. Nothing to do.</dd>
@@ -24,8 +24,6 @@ Ask someone with edit rights to add the first certificate.{% endif %}</p>
     <dt class="swatch-expired">Expired</dt>
     <dd>The date has passed. Anything using this certificate may have stopped working.</dd>
   </dl>
-  <p>{{ app_settings.contact_line }}</p>
   {% if archived_count %}<p><a href="/archive">{{ archived_count }} archived certificate{{ '' if archived_count == 1 else 's' }}</a></p>{% endif %}
-  <p class="small">This page refreshes itself every hour. Days left are worked out fresh each time.</p>
 </section>
 {% endblock %}

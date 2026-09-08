@@ -116,7 +116,7 @@ what to compare it against.</p>
 <dl class="facts">
   <dt>Sign-in</dt><dd>{{ env.auth_mode }}{% if env.auth_mode == 'cloudflare' %} — Cloudflare Access team “{{ env.cf_access_team }}”{% endif %}</dd>
   <dt>Editors</dt><dd>{{ env.editor_email_set | list | sort | join(', ') or 'nobody — everyone is read-only' }}</dd>
-  <dt>Email</dt><dd>{% if env.smtp_configured %}{{ env.smtp_host }}:{{ env.smtp_port }}, from {{ env.smtp_from }}{% else %}not configured{% endif %}</dd>
+  <dt>Email</dt><dd>{{ env.email_description }}</dd>
   <dt>Teams</dt><dd>{% if app_settings.teams_webhook_url %}a webhook is configured{% else %}not configured{% endif %}</dd>
   <dt>Daily run</dt><dd>{{ env.daily_run_time }} {{ env.timezone }}</dd>
   <dt>Expired alerts</dt><dd>{% if app_settings.expired_teams_every_hours %}Teams,

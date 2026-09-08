@@ -130,7 +130,8 @@ def test_registering_sends_two_invites(
         assert "SEQUENCE:0" in body
         assert "TRIGGER:-P7D" in body
         assert "TRIGGER:-P1D" in body
-        assert "ORGANIZER;CN=NotAfter:MAILTO:notafter@example.org" in body
+        # The library quotes a parameter value containing a space, per RFC 5545.
+        assert 'ORGANIZER;CN="No After":MAILTO:noafter@example.org' in body
 
     stored = session.exec(select(CalendarInvite)).all()
     assert {invite.uid for invite in stored} == {
@@ -231,3 +232,23 @@ async def test_an_archived_certificate_gets_no_notifications(
     run = await run_daily_job(session, Notifier(test_settings))
     assert run.notifications_sent == 0
     assert outbox.mail == []
+
+
+def test_calendar_identifiers_do_not_follow_the_display_name(
+    editor: Client, session: Session, outbox: Outbox, app_settings
+):
+    """UID and PRODID are stable identifiers, not branding.
+
+    Renaming the application must never change them: calendar clients match
+    an update or a cancellation to the event people already hold by UID, and
+    a new one would orphan every invite ever sent.
+    """
+    _register(editor, make_cert(days_until_expiry=200))
+    record = _only(session)
+    bodies = [invite.calendar.decode() for invite in outbox.invites if invite.calendar]
+
+    assert bodies
+    for body in bodies:
+        assert f"UID:cert-{record.id}-" in body
+        assert "@notafter" in body
+        assert "PRODID:-//NotAfter//" in body

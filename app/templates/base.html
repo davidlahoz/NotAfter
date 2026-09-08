@@ -5,15 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {% block refresh %}<meta http-equiv="refresh" content="3600">{% endblock %}
 <meta name="referrer" content="no-referrer">
-<title>{{ title }} — NotAfter</title>
+<meta name="color-scheme" content="light">
+<title>{{ title }} — No After</title>
+<link rel="preload" href="/static/fonts/inter-variable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/nabla-wordmark.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/notafter.css">
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 </head>
 <body>
+<a class="skip" href="#main">Skip to the certificates</a>
+
 <header class="masthead">
   <div class="masthead-inner">
-    <h1><a href="/">NotAfter</a></h1>
-    <nav>
+    <h1><a href="/"><span class="wordmark">No After</span></a></h1>
+    <nav aria-label="Sections">
       <a href="/"{% if request.url.path == '/' %} aria-current="page"{% endif %}>Board</a>
       <a href="/archive"{% if request.url.path == '/archive' %} aria-current="page"{% endif %}>Archive</a>
       {% if user and user.is_editor %}
@@ -26,13 +31,15 @@
   </div>
 </header>
 
-<main class="wrap">
-  {% if message %}<p class="notice">{{ message }}</p>{% endif %}
-  {% if error_message %}<p class="warning">{{ error_message }}</p>{% endif %}
+<main class="wrap" id="main">
+  <div aria-live="polite">
+    {% if message %}<p class="notice">{{ message }}</p>{% endif %}
+    {% if error_message %}<p class="warning">{{ error_message }}</p>{% endif %}
+  </div>
   {% block content %}{% endblock %}
 
   <footer>
-    <p>NotAfter {{ app_version }} — a register of certificate expiry dates.
+    <p>No After {{ app_version }} — a register of certificate expiry dates.
     Private keys are never uploaded, parsed or stored.</p>
   </footer>
 </main>

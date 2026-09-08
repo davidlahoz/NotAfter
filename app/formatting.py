@@ -112,3 +112,12 @@ def humanise_list(values: list[str], empty: str = "nobody") -> str:
     if len(cleaned) == 1:
         return cleaned[0]
     return f"{', '.join(cleaned[:-1])} and {cleaned[-1]}"
+
+
+def fingerprint_groups(fingerprint: str) -> list[str]:
+    """A hex fingerprint as colon-separated pairs, ready to be laid out.
+
+    Returned as a list so the template can put a break opportunity after each
+    pair. Joining them with a colon gives the usual display form.
+    """
+    return [fingerprint[index : index + 2].upper() for index in range(0, len(fingerprint), 2)]

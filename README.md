@@ -1,4 +1,4 @@
-# NotAfter
+# No After
 
 A certificate expiry board. Someone uploads a certificate, everyone else sees
 a plain-language page saying how long is left, and the right people get an
@@ -9,7 +9,7 @@ track nowhere — AS2 signing and encryption certificates, TLS server
 certificates, partner and client certificates. NotAfter never connects to the
 systems that use those certificates. It is only fed the files.
 
-**NotAfter is a register of expiry dates, not a key store. It never receives,
+**No After is a register of expiry dates, not a key store. It never receives,
 parses, stores, logs or transmits a private key.** Everything else in the
 design gives way to that.
 
@@ -33,7 +33,7 @@ says who the certificate is for, who issued it, and when it expires. A
 key* — the secret half, which proves ownership. Private keys must never be
 copied around.
 
-### What NotAfter stores
+### What No After stores
 
 For each certificate, exactly these fields:
 
@@ -53,7 +53,7 @@ For each certificate, exactly these fields:
 Plus who registered it and when, which notifications went out, and an audit
 line for every change.
 
-### What NotAfter never stores
+### What No After never stores
 
 - **Private keys.** No column in the database can hold one. There is no code
   path that reads one.
@@ -102,6 +102,14 @@ fewer, red once expired. Both thresholds are configurable. "Days left" is
 never stored — it is worked out from the expiry date every time a page is
 rendered or a notification is considered.
 
+**Who did what.** Access authenticates every request, so there is no login
+page — the first request carrying a new Access token *is* the sign-in, and it
+is recorded as `auth.signin` in the audit trail with the email from the JWT.
+Subsequent requests on the same token are the same session, so this is one
+line per person per session rather than one per request. Every change is
+recorded against the same email. Neither record holds the token, a cookie or
+an IP address.
+
 **Notifications.** The job runs **once a day**, at `DAILY_RUN_TIME`. Each
 certificate gets **at most one message per run**, on every configured channel —
 so email and Teams carry the same reminder, on the same day.
@@ -142,7 +150,8 @@ Calendar rather than leaving them behind.
 - An existing **host-level** `cloudflared` service, already connected to your
   Cloudflare account.
 - A Cloudflare Access application in front of the hostname you will use.
-- An SMTP server that will relay for you.
+- A [Resend](https://resend.com) account with a verified sending domain,
+  or any SMTP server.
 - Optionally, a Microsoft Teams **Workflows** webhook.
 
 NotAfter does not run a tunnel, a reverse proxy or an ACME client, and the
@@ -170,7 +179,8 @@ Fill in `.env`. The values that matter most:
 | `CF_ACCESS_TEAM` | The `<team>` in `https://<team>.cloudflareaccess.com`. |
 | `CF_ACCESS_AUD` | The Access application's Audience tag (step 3). |
 | `EDITOR_EMAILS` | Who may change things. Everyone else is read-only. |
-| `SMTP_*` | Your mail relay. `SMTP_FROM` is also the invite organiser. |
+| `RESEND_API_KEY` | From the Resend dashboard. |
+| `EMAIL_FROM` | The sending address, on a domain verified in Resend. It is also the organiser of every calendar invite. |
 
 The app refuses to start in `AUTH_MODE=cloudflare` without `CF_ACCESS_TEAM`
 and `CF_ACCESS_AUD`, or with the placeholder `SECRET_KEY` still in place.
@@ -189,7 +199,7 @@ Or, if the host's `cloudflared` is configured from a file, add to its
 
 ```yaml
 ingress:
-  - hostname: certs.example.org
+  - hostname: noafter.example.org
     service: http://127.0.0.1:8087
   - service: http_status:404
 ```
@@ -350,7 +360,8 @@ Run the browser test — which proves that only PEM leaves the page — with:
   small `AuthProvider` interface. Cloudflare Access is built in; adding OIDC
   means writing one class. The Access JWT is validated on every request —
   issuer, audience, expiry and signature, against keys fetched from
-  `/cdn-cgi/access/certs` and cached.
+  `/cdn-cgi/access/certs` and cached. The email in that token is the identity
+  used everywhere: it names who signed in and who made every change.
 - **Roles** are `viewer` (anyone who passes Access) and `editor` (listed in
   `EDITOR_EMAILS`). Every editor action re-checks.
 - **CSRF**: signed double-submit tokens on every state-changing request.
@@ -362,7 +373,8 @@ Run the browser test — which proves that only PEM leaves the page — with:
 - **The container** runs as uid 10001 with a read-only root filesystem, all
   capabilities dropped, `no-new-privileges`, and a pinned base image by
   digest. It needs outbound access to your SMTP server and, if you use it, the
-  Teams webhook. Nothing else.
+  Teams webhook, and `api.resend.com` when email goes through Resend. Nothing
+  else.
 
 Found something? Open an issue for anything that is not itself a
 vulnerability; for a vulnerability, see [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -373,11 +385,6 @@ vulnerability; for a vulnerability, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Choices made while building this, and why.
 
-- **System font stack, no vendored font file.** The specification allowed
-  Inter *if vendored*. Shipping a binary font would add roughly 300 KB and a
-  licence file to a repository whose point is that it serves everything
-  itself; the system stack renders the one bold element — the countdown — just
-  as well. Change `--font` in `app/static/notafter.css` if you disagree.
 - **A small in-process rate limiter instead of `slowapi`.** The specification
   said "slowapi or equivalent". One container serves this app, so a
   sliding-window limiter in memory is exactly as effective and is 40 lines
@@ -407,6 +414,28 @@ Choices made while building this, and why.
   decrypted; the private key bag is encrypted separately and is never passed
   to the decryptor. Importing forge's individual modules rather than its index
   keeps 140 KB out of the bundle.
+- **Email goes through Resend's HTTP API by default, and this costs something.**
+  Resend has no way to express a `multipart/alternative` `text/calendar` part,
+  which is what makes Outlook and Google Calendar render an invite with accept
+  and decline buttons. Over the API an invite arrives as an `.ics` attachment
+  with the right `method=` content type — openable, but not a native invite.
+  Resend's own SMTP relay does not have this limitation, so
+  `EMAIL_PROVIDER=smtp` with `SMTP_HOST=smtp.resend.com` is the setting to use
+  if the calendar behaviour matters more than the API does. Both go through
+  the same Resend account.
+- **The display name is "No After"; the identifiers are not.** The wordmark,
+  the page titles and the wording of every message say "No After". The
+  iCalendar `UID`s and `PRODID` still say `notafter`, and must: a calendar
+  client matches an update or a cancellation to the event someone already
+  holds by `UID`, so changing it would orphan every invite ever sent. The
+  Python package, the database file and the container keep the old name for
+  the same reason — they are addresses, not branding.
+- **Two vendored typefaces, both subset.** Inter for everything, subset to
+  Latin with its weight and optical-size axes intact (119 KB). Nabla for the
+  wordmark, subset to its eight characters (5 KB) — a chromatic COLRv1 face
+  recoloured to the brand palette with `@font-palette-values`. Both are SIL
+  OFL and their licences are served next to them. Sources and the rebuild
+  step are in `assets/fonts/`.
 - **`create_all` at start-up as well as Alembic.** Migrations are what runs in
   the container; `create_all` is what makes a fresh test database. Both derive
   from the same models.

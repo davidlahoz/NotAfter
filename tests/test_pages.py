@@ -52,16 +52,53 @@ def test_board_formats_the_date_in_words(viewer: Client, session: Session, app_s
     assert f"Valid until {expected}" in viewer.get("/").text
 
 
-def test_board_explains_the_colours_and_who_to_contact(
-    viewer: Client, session: Session, app_settings
-):
+def test_board_explains_the_colours(viewer: Client, session: Session, app_settings):
+    body = viewer.get("/").text
+    assert "What the colours mean" in body
+    assert "In date" in body and "Expired" in body
+    assert "Renew now" in body and "Plan the renewal" in body
+
+
+def test_the_board_carries_no_standing_advice(viewer: Client, session: Session, app_settings):
+    """The board lists certificates; it does not lecture about them."""
     app_settings.contact_line = "Ask the integration team on the helpdesk."
     session.add(app_settings)
     session.commit()
     body = viewer.get("/").text
-    assert "What the colours mean" in body
-    assert "Ask the integration team on the helpdesk." in body
-    assert "In date" in body and "Expired" in body
+    assert "Ask the integration team on the helpdesk." not in body
+    assert "refreshes itself every hour" not in body
+
+
+async def test_the_contact_line_still_reaches_notifications(
+    session: Session, outbox, app_settings, test_settings
+):
+    """Removing it from the board must not remove it from the messages."""
+    import datetime as dt
+
+    from app.jobs import run_daily_job
+    from app.models import CertSource
+    from app.notifier import Notifier
+
+    app_settings.contact_line = "Ask the integration team on the helpdesk."
+    app_settings.teams_webhook_url = "https://example.org/webhook"
+    session.add(app_settings)
+    session.add(
+        Certificate(
+            label="Integration PROD",
+            source=CertSource.UPLOAD,
+            verified=True,
+            not_after=dt.datetime.now() + dt.timedelta(days=7),
+            fingerprint_sha256="fp-contact",
+        )
+    )
+    session.commit()
+
+    await run_daily_job(session, Notifier(test_settings))
+    assert "Ask the integration team on the helpdesk." in outbox.mail[0].text
+    card = outbox.cards[0]["attachments"][0]["content"]["body"]
+    assert any(
+        "Ask the integration team on the helpdesk." in str(block.get("text", "")) for block in card
+    )
 
 
 def test_board_refreshes_itself_every_hour(viewer: Client, app_settings):
@@ -192,7 +229,7 @@ def test_test_email_button_sends_to_the_signed_in_user(
     response = editor.post_form("/settings/test-email", {}, follow_redirects=False)
     assert response.status_code == 303
     assert outbox.mail[-1].to == ["editor@example.org"]
-    assert outbox.mail[-1].subject == "NotAfter test email"
+    assert outbox.mail[-1].subject == "No After — test email"
 
 
 def test_teams_test_card_is_the_same_shape_as_a_real_one(
@@ -213,7 +250,7 @@ def test_teams_test_card_is_the_same_shape_as_a_real_one(
     assert [block["type"] for block in test_content["body"]][1:] == [
         block["type"] for block in real_content["body"]
     ]
-    assert "Test message from NotAfter" in test_content["body"][0]["text"]
+    assert "Test message from No After" in test_content["body"][0]["text"]
 
 
 async def test_teams_test_reports_the_status_the_webhook_returned(

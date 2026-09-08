@@ -19,6 +19,8 @@ ALLOWED_IN_TEXT = (
     "http://adaptivecards.io/schemas/adaptive-card.json",  # a JSON schema id, never fetched
     "https://certs.example.org",  # placeholder in documentation strings
     "http://www.w3.org/2000/svg",  # an XML namespace, never fetched
+    "https://scripts.sil.org/OFL",  # the font licence's own URL, in a text file
+    "http://scripts.sil.org/OFL",
 )
 
 
@@ -58,11 +60,37 @@ def test_served_html_references_no_external_origin(editor: Client, session, outb
         assert not found, f"{path} refers to {found[:3]}"
 
 
+#: Assets a page can actually reference, and which could therefore carry a
+#: URL the browser would fetch. Fonts are binary — they are checked by
+#: :func:`test_vendored_fonts_are_served_by_the_app`. Licence files are text
+#: but no page links to them, and they legitimately cite their own upstream.
+TEXT_ASSET_SUFFIXES = {".css", ".js", ".svg", ".json", ".map"}
+
+
 def test_static_assets_reference_no_external_origin():
-    for asset in (APP_DIR / "static").iterdir():
+    for asset in (APP_DIR / "static").rglob("*"):
+        if not asset.is_file() or asset.suffix not in TEXT_ASSET_SUFFIXES:
+            continue
         text = asset.read_text(encoding="utf-8", errors="replace")
         found = EXTERNAL_URL_RE.findall(_strip_allowed(text))
         assert not found, f"{asset.name} refers to {found[:3]}"
+
+
+def test_vendored_fonts_are_served_by_the_app():
+    """No CDN, no Google Fonts: the font files are in the repository."""
+    fonts = APP_DIR / "static" / "fonts"
+    served = {path.name for path in fonts.glob("*.woff2")}
+    assert served == {"inter-variable.woff2", "nabla-wordmark.woff2"}
+
+    stylesheet = (APP_DIR / "static" / "notafter.css").read_text()
+    for name in served:
+        assert f'url("/static/fonts/{name}")' in stylesheet, name
+    assert "fonts.googleapis.com" not in stylesheet
+    assert "@import" not in stylesheet
+
+    # Both faces are OFL, so their licences travel with them.
+    licences = {path.name for path in fonts.glob("*LICENSE*")}
+    assert licences == {"Inter-LICENSE.txt", "Nabla-LICENSE.txt"}
 
 
 def test_templates_reference_no_external_origin():

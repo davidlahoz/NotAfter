@@ -63,7 +63,7 @@ def _description(cert: Certificate, kind: InviteKind, detail_url: str) -> str:
         opening,
         "",
         "Request the replacement certificate from whoever issues it, install it",
-        "in the system that uses it, then register the new file in NotAfter so",
+        "in the system that uses it, then register the new file in No After so",
         "this board and these reminders move to the new expiry date.",
         "",
         f"Details: {detail_url}",

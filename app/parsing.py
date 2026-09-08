@@ -207,7 +207,7 @@ def reject_private_key_material(data: bytes) -> None:
         for label in labels:
             if any(marker in label for marker in PRIVATE_KEY_MARKERS):
                 raise PrivateKeyMaterialError(
-                    "This file contains a private key. NotAfter only ever stores "
+                    "This file contains a private key. No After only ever stores "
                     "public certificates, so the upload was refused and nothing "
                     "was saved. Remove the private key block and upload only the "
                     "'-----BEGIN CERTIFICATE-----' part, or use manual entry."
@@ -237,7 +237,7 @@ def reject_private_key_material(data: bytes) -> None:
             return
         case _:
             raise UnsupportedFormat(
-                "This file is not a certificate in a format NotAfter accepts. "
+                "This file is not a certificate in a format No After accepts. "
                 "Accepted here: PEM, DER (.crt/.cer/.der) and PKCS#7 (.p7b/.p7c). "
                 + EXTRACT_IN_BROWSER_HINT
             )

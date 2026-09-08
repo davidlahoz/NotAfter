@@ -82,7 +82,7 @@ def build_card(
                 "type": "TextBlock",
                 "text": (
                     f"This alert repeats every {every} until the certificate is "
-                    "renewed, archived or muted in NotAfter."
+                    "renewed, archived or muted in No After."
                 ),
                 "wrap": True,
                 "isSubtle": True,
@@ -104,7 +104,7 @@ def build_card(
                     "actions": [
                         {
                             "type": "Action.OpenUrl",
-                            "title": "Open in NotAfter",
+                            "title": "Open in No After",
                             "url": detail_url,
                         }
                     ],
@@ -133,7 +133,7 @@ def build_test_card(
         0,
         {
             "type": "TextBlock",
-            "text": "Test message from NotAfter — this is what a reminder looks like.",
+            "text": "Test message from No After — this is what a reminder looks like.",
             "wrap": True,
             "isSubtle": True,
             "size": "Small",

@@ -14,6 +14,7 @@ from app import __version__
 from app.formatting import (
     countdown_phrase,
     days_left,
+    fingerprint_groups,
     format_date,
     format_datetime,
     humanise_list,
@@ -35,6 +36,7 @@ templates.env.filters.update(
     datetime=format_datetime,
     countdown=countdown_phrase,
     fingerprint=format_fingerprint,
+    fingerprint_groups=fingerprint_groups,
     names=humanise_list,
 )
 

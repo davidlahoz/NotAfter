@@ -1,0 +1,5 @@
+{# The one loud element. `days` must be in scope. #}
+<p class="countdown">
+  <span class="value">{% if days < 0 %}{{ -days }}{% else %}{{ days }}{% endif %}</span>
+  <span class="unit">{% if days < 0 %}day{{ '' if -days == 1 else 's' }} ago{% elif days == 0 %}expires today{% else %}day{{ '' if days == 1 else 's' }} left{% endif %}</span>
+</p>
