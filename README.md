@@ -88,13 +88,28 @@ tests for each of those cases.
 
 ## How it works
 
-### What you can change without a deploy
+### Global settings, and per-certificate ones
 
-Everything about *when* people are told is on the settings page: which days
-before expiry send an email and a Teams card, how far ahead the renewal event
-sits, what alarms attendees get, how often an expired certificate re-alerts
-Teams, and where the amber and red thresholds fall. The only timing fixed by
-the environment is what time of day the job runs (`DAILY_RUN_TIME`).
+The settings page holds the defaults: which days before expiry send an email
+and a Teams card, how far ahead the renewal event sits, what alarms attendees
+get, how often an expired certificate re-alerts Teams, where amber and red
+fall, and who is notified. The only timing fixed by the environment is what
+time of day the job runs (`DAILY_RUN_TIME`).
+
+Any certificate can depart from those defaults on its own page — its own
+reminder days, its own calendar lead time and alarms, its own list of people,
+or a mute. Each is an override: leave it empty and the certificate follows the
+global setting, so a certificate differs only where somebody said it should.
+Its page states which of the two it is following.
+
+**One message, not one each.** Everyone on a certificate's list is addressed
+on a single email, and they are the attendees on that certificate's two
+calendar events — so people can see who else knows, and a reply reaches them.
+
+**Teams stays global.** A channel is somewhere people are invited in Teams;
+which of them should hear about which certificate is not something this
+application can or should decide. Per-certificate control over Teams is
+therefore the mute, and nothing finer.
 
 | Page | Who | What |
 |---|---|---|

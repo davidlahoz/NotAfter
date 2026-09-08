@@ -111,10 +111,18 @@ class Certificate(SQLModel, table=True):
     superseded_by_id: int | None = Field(default=None, foreign_key="certificate.id", index=True)
 
     # --- Notification preferences ----------------------------------------
+    # Each of these is an override: null means "use the global setting", so a
+    # certificate only differs where somebody has said it should.
     muted: bool = Field(default=False)
     extra_recipients: list[str] = Field(
         default_factory=list, sa_column=Column(JSON, nullable=False)
     )
+    #: When set, ``extra_recipients`` is the whole audience for this
+    #: certificate rather than an addition to the default recipients.
+    recipients_replace_defaults: bool = Field(default=False)
+    reminder_days: list[int] | None = Field(default=None, sa_column=Column(JSON))
+    calendar_renew_lead_days: int | None = Field(default=None)
+    calendar_alarm_days: list[int] | None = Field(default=None, sa_column=Column(JSON))
 
     created_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime, nullable=False))
     updated_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime, nullable=False))
@@ -129,6 +137,38 @@ class Certificate(SQLModel, table=True):
     def is_active(self) -> bool:
         """Whether this record still appears on the board."""
         return self.status == CertStatus.ACTIVE
+
+    # -- Effective settings -------------------------------------------------
+    # One place decides whether this certificate's own value or the global
+    # default applies, so the job, the calendar and the page cannot disagree.
+
+    def thresholds(self, defaults: AppSettings) -> list[int]:
+        """Days before expiry that send an email and a Teams card."""
+        return self.reminder_days if self.reminder_days else list(defaults.thresholds)
+
+    def renew_lead_days(self, defaults: AppSettings) -> int:
+        """How far before expiry this certificate's renewal event sits."""
+        if self.calendar_renew_lead_days is None:
+            return defaults.calendar_renew_lead_days
+        return self.calendar_renew_lead_days
+
+    def alarm_days(self, defaults: AppSettings) -> list[int]:
+        """Reminders the attendee's calendar fires before each event."""
+        if self.calendar_alarm_days is None:
+            return list(defaults.calendar_alarm_days)
+        return list(self.calendar_alarm_days)
+
+    def has_own_schedule(self, defaults: AppSettings) -> bool:
+        """Whether this certificate departs from the global schedule."""
+        return (
+            self.reminder_days is not None
+            or self.calendar_renew_lead_days is not None
+            or self.calendar_alarm_days is not None
+        ) and (
+            self.thresholds(defaults) != list(defaults.thresholds)
+            or self.renew_lead_days(defaults) != defaults.calendar_renew_lead_days
+            or self.alarm_days(defaults) != list(defaults.calendar_alarm_days)
+        )
 
 
 class NotificationLog(SQLModel, table=True):

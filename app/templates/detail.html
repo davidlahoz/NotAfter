@@ -37,7 +37,17 @@
   {% if cert.sans %}<dt>Also valid for</dt><dd class="mono">{{ cert.sans | join(', ') }}</dd>{% endif %}
   {% if cert.key_algorithm %}<dt>Key</dt><dd>{{ cert.key_algorithm }}{% if cert.key_size %}, {{ cert.key_size }} bits{% endif %}</dd>{% endif %}
   <dt>Registered</dt><dd>{{ cert.created_at | datetime }}{% if cert.created_by %} by {{ cert.created_by }}{% endif %}</dd>
-  <dt>Reminders</dt><dd>{% if cert.muted %}Muted{% else %}On — {{ notify_recipients | names('the default recipients') }}{% endif %}</dd>
+  <dt>Reminders</dt>
+  <dd>{% if cert.muted %}Muted{% else %}
+    {{ cert.thresholds(app_settings) | join(', ') }} days before expiry, and on the day.
+    {% if cert.has_own_schedule(app_settings) %}<span class="unverified">Its own schedule.</span>
+    {% else %}Following the global schedule.{% endif %}{% endif %}</dd>
+  <dt>Notified</dt><dd>{{ notify_recipients | names('nobody') }}
+    {%- if cert.recipients_replace_defaults %} (only these people){% endif %}</dd>
+  <dt>Calendar</dt>
+  <dd>Expiry event on {{ cert.not_after | date }}, renewal event
+    {{ cert.renew_lead_days(app_settings) }} day{{ '' if cert.renew_lead_days(app_settings) == 1 else 's' }}
+    earlier; reminders {{ cert.alarm_days(app_settings) | join(' and ') }} day(s) before each.</dd>
   {% if cert.notes %}<dt>Notes</dt><dd>{{ cert.notes }}</dd>{% endif %}
   {% if previous or successor %}
     <dt>Renewal chain</dt>
@@ -64,14 +74,50 @@
     <span class="hint">For example TEST or PROD.</span></div>
   <div class="field"><label for="owner_email">Owner email</label>
     <input type="email" id="owner_email" name="owner_email" value="{{ cert.owner_email }}" maxlength="200"></div>
-  <div class="field"><label for="extra_recipients">Extra people to notify</label>
-    <input type="text" id="extra_recipients" name="extra_recipients" value="{{ cert.extra_recipients | join(', ') }}">
-    <span class="hint">Email addresses separated by commas, notified in addition to the default recipients.</span></div>
   <div class="field"><label for="notes">Notes</label>
     <textarea id="notes" name="notes" maxlength="2000">{{ cert.notes }}</textarea></div>
-  <div class="checkbox">
-    <input type="checkbox" id="muted" name="muted" value="1"{% if cert.muted %} checked{% endif %}>
-    <label for="muted">Mute reminders for this certificate</label></div>
+
+  <fieldset>
+    <legend>Who is told about this certificate</legend>
+    <p class="hint">One email goes to everyone below, and they are the attendees
+      on its two calendar events — not a message each.</p>
+    <div class="field"><label for="extra_recipients">People to notify</label>
+      <input type="text" id="extra_recipients" name="extra_recipients" value="{{ cert.extra_recipients | join(', ') }}">
+      <span class="hint">Email addresses separated by commas. The owner above is always
+        included.</span></div>
+    <div class="checkbox">
+      <input type="checkbox" id="recipients_replace_defaults" name="recipients_replace_defaults" value="1"
+             {% if cert.recipients_replace_defaults %}checked{% endif %}>
+      <label for="recipients_replace_defaults">Tell only these people — not the default
+        recipients{% if app_settings.recipient_emails %}
+        ({{ app_settings.recipient_emails | join(', ') }}){% endif %}</label></div>
+    <p class="hint">Currently notified: {{ notify_recipients | names('nobody') }}.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>When this certificate is chased</legend>
+    <p class="hint">Leave a field empty to follow the
+      <a href="/settings">global schedule</a>.</p>
+    <div class="field"><label for="reminder_days">Email and Teams, this many days before expiry</label>
+      <input type="text" id="reminder_days" name="reminder_days"
+             value="{{ cert.reminder_days | join(', ') if cert.reminder_days else '' }}"
+             placeholder="{{ app_settings.thresholds | join(', ') }}">
+      <span class="hint">The expiry day itself always sends one, whatever this says.</span></div>
+    <div class="field"><label for="calendar_renew_lead_days">“Renew” event, this many days before expiry</label>
+      <input type="number" id="calendar_renew_lead_days" name="calendar_renew_lead_days" min="0" max="3650"
+             value="{{ cert.calendar_renew_lead_days if cert.calendar_renew_lead_days is not none else '' }}"
+             placeholder="{{ app_settings.calendar_renew_lead_days }}"></div>
+    <div class="field"><label for="calendar_alarm_days">Calendar reminders, this many days before each event</label>
+      <input type="text" id="calendar_alarm_days" name="calendar_alarm_days"
+             value="{{ cert.calendar_alarm_days | join(', ') if cert.calendar_alarm_days else '' }}"
+             placeholder="{{ app_settings.calendar_alarm_days | join(', ') }}">
+      <span class="hint">Changing either calendar field re-sends this certificate's invites, so
+        the events already in people's calendars move rather than being duplicated.</span></div>
+    <div class="checkbox">
+      <input type="checkbox" id="muted" name="muted" value="1"{% if cert.muted %} checked{% endif %}>
+      <label for="muted">Mute reminders for this certificate</label></div>
+  </fieldset>
+
   <div class="actions"><button type="submit">Save changes</button></div>
 </form>
 

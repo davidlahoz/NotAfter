@@ -356,8 +356,12 @@ def update_details(
     notes: str,
     extra_recipients: list[str],
     muted: bool,
+    recipients_replace_defaults: bool = False,
+    reminder_days: list[int] | None = None,
+    calendar_renew_lead_days: int | None = None,
+    calendar_alarm_days: list[int] | None = None,
 ) -> Certificate:
-    """Edit the human-entered fields of a record."""
+    """Edit the human-entered fields and the per-certificate schedule."""
     changed = {
         name: value
         for name, value in (
@@ -365,6 +369,10 @@ def update_details(
             ("environment", environment.strip()),
             ("owner_email", owner_email.strip()),
             ("muted", muted),
+            ("recipients_replace_defaults", recipients_replace_defaults),
+            ("reminder_days", reminder_days),
+            ("calendar_renew_lead_days", calendar_renew_lead_days),
+            ("calendar_alarm_days", calendar_alarm_days),
         )
         if getattr(cert, name) != value
     }
@@ -373,7 +381,11 @@ def update_details(
     cert.owner_email = owner_email.strip()
     cert.notes = notes.strip()
     cert.extra_recipients = [address.strip() for address in extra_recipients if address.strip()]
+    cert.recipients_replace_defaults = recipients_replace_defaults
     cert.muted = muted
+    cert.reminder_days = reminder_days
+    cert.calendar_renew_lead_days = calendar_renew_lead_days
+    cert.calendar_alarm_days = calendar_alarm_days
     cert.updated_at = utcnow()
     session.add(cert)
     session.commit()

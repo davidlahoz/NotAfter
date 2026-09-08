@@ -20,6 +20,7 @@ from app.models import (
     AuditLog,
     CalendarInvite,
     Certificate,
+    CertStatus,
     Channel,
     InviteKind,
     NotificationLog,
@@ -313,12 +314,29 @@ async def update_certificate(
     owner_email: Annotated[str, Form()] = "",
     notes: Annotated[str, Form()] = "",
     extra_recipients: Annotated[str, Form()] = "",
+    recipients_replace_defaults: Annotated[str, Form()] = "",
     muted: Annotated[str, Form()] = "",
+    reminder_days: Annotated[str, Form()] = "",
+    calendar_renew_lead_days: Annotated[str, Form()] = "",
+    calendar_alarm_days: Annotated[str, Form()] = "",
     session: Session = DbSession,
     user: User = Editor,
 ) -> RedirectResponse:
-    """Edit the label, owner, notes, extra recipients and mute flag."""
+    """Edit this certificate's details and its own notification schedule.
+
+    An empty schedule field means "use the global setting", so a certificate
+    only differs where somebody has said it should.
+    """
     cert = load_certificate(cert_id, session)
+    app_settings = load_app_settings(session)
+    before = (
+        cert.renew_lead_days(app_settings),
+        cert.alarm_days(app_settings),
+        cert.recipients_replace_defaults,
+        list(cert.extra_recipients),
+        cert.owner_email,
+    )
+
     update_details(
         session,
         user,
@@ -328,9 +346,43 @@ async def update_certificate(
         owner_email=owner_email,
         notes=notes,
         extra_recipients=[part.strip() for part in extra_recipients.replace("\n", ",").split(",")],
+        recipients_replace_defaults=bool(recipients_replace_defaults),
         muted=bool(muted),
+        reminder_days=_day_list(reminder_days),
+        calendar_renew_lead_days=_optional_int(calendar_renew_lead_days),
+        calendar_alarm_days=_day_list(calendar_alarm_days),
     )
+
+    # The calendar only moves an event when it receives an update for the same
+    # UID, so a change to this certificate's timing or audience has to go out.
+    after = (
+        cert.renew_lead_days(app_settings),
+        cert.alarm_days(app_settings),
+        cert.recipients_replace_defaults,
+        list(cert.extra_recipients),
+        cert.owner_email,
+    )
+    if before != after and cert.status is not CertStatus.ARCHIVED:
+        await get_notifier(request).send_invites(session, cert, app_settings)
+        return RedirectResponse(f"/certificates/{cert_id}?msg=calendar-retimed", status_code=303)
     return RedirectResponse(f"/certificates/{cert_id}?msg=updated", status_code=303)
+
+
+def _day_list(value: str) -> list[int] | None:
+    """Parse a comma-separated day list, or ``None`` to inherit the default."""
+    parts = [part.strip() for part in value.replace("\n", ",").split(",")]
+    numbers = sorted(
+        {int(part) for part in parts if part.isdigit() and int(part) > 0}, reverse=True
+    )
+    return numbers or None
+
+
+def _optional_int(value: str) -> int | None:
+    """Parse a number, or ``None`` to inherit the default."""
+    cleaned = value.strip()
+    if not cleaned.isdigit():
+        return None
+    return min(int(cleaned), 3650)
 
 
 @router.post("/{cert_id}/archive")

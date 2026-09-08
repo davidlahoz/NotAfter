@@ -119,7 +119,7 @@ async def run_daily_job(
     for cert in certificates:
         plan = plan_for(
             cert,
-            app_settings.thresholds,
+            cert.thresholds(app_settings),
             today=reference,
             notify_when_expired=app_settings.notify_daily_when_expired,
         )

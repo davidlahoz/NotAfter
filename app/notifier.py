@@ -80,21 +80,33 @@ class Notifier:
     # -- addressing -----------------------------------------------------
 
     def recipients_for(self, cert: Certificate, app_settings: AppSettings) -> list[str]:
-        """Default recipients plus the certificate's own, de-duplicated."""
-        addresses = [
-            *app_settings.recipient_emails,
-            *cert.extra_recipients,
-        ]
+        """Who is told about this certificate.
+
+        The default recipients plus anyone named on the certificate — unless
+        the certificate says its own list replaces the defaults, in which case
+        only its own people are told. The owner is always included: they are
+        the one who has to act.
+
+        One list, because one message goes to all of them.
+        """
+        base = [] if cert.recipients_replace_defaults else list(app_settings.recipient_emails)
+        addresses = [*base, *cert.extra_recipients]
         if cert.owner_email:
             addresses.append(cert.owner_email)
         return _unique(addresses)
 
     def calendar_recipients_for(self, cert: Certificate, app_settings: AppSettings) -> list[str]:
-        """Calendar invites may go to a different list than the emails."""
-        addresses = list(app_settings.calendar_recipient_emails)
-        if not addresses:
-            addresses = list(app_settings.recipient_emails)
-        addresses.extend(cert.extra_recipients)
+        """Who is invited to this certificate's calendar events.
+
+        The same people as the emails, so nobody has to reconcile two lists —
+        except that a separate global calendar list, if one is configured,
+        stands in for the default recipients.
+        """
+        if cert.recipients_replace_defaults:
+            base: list[str] = []
+        else:
+            base = list(app_settings.calendar_recipient_emails or app_settings.recipient_emails)
+        addresses = [*base, *cert.extra_recipients]
         if cert.owner_email:
             addresses.append(cert.owner_email)
         return _unique(addresses)
@@ -297,12 +309,12 @@ class Notifier:
                     cert_id=cert.id or 0,
                     kind=kind,
                     uid=event_uid(cert.id or 0, kind),
-                    event_date=event_date_for(cert, kind, app_settings.calendar_renew_lead_days),
+                    event_date=event_date_for(cert, kind, cert.renew_lead_days(app_settings)),
                 )
                 session.add(record)
             record.sequence = sequence
             record.method = method
-            record.event_date = event_date_for(cert, kind, app_settings.calendar_renew_lead_days)
+            record.event_date = event_date_for(cert, kind, cert.renew_lead_days(app_settings))
             record.recipients = recipients
             record.sent_at = utcnow()
             record.status = status
@@ -331,12 +343,12 @@ class Notifier:
             organizer_name=self._settings.from_name,
             attendees=recipients,
             detail_url=self.detail_url(cert),
-            renew_lead_days=app_settings.calendar_renew_lead_days,
-            alarm_days=app_settings.calendar_alarm_days,
+            renew_lead_days=cert.renew_lead_days(app_settings),
+            alarm_days=cert.alarm_days(app_settings),
         )
         summary = event_summary(cert, kind)
         verb = "Cancelled" if method is InviteMethod.CANCEL else "Calendar reminder"
-        when = format_date(event_date_for(cert, kind, app_settings.calendar_renew_lead_days))
+        when = format_date(event_date_for(cert, kind, cert.renew_lead_days(app_settings)))
         text = (
             f"{verb}: {summary}\n\n"
             f"Date: {when}\n"
