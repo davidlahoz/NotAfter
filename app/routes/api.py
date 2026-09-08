@@ -10,6 +10,7 @@ from sqlmodel import Session
 
 from app import __version__
 from app.auth import User
+from app.config import Settings
 from app.jobs import NotificationScheduler, last_job_run, run_daily_job
 from app.routes.deps import DbSession, Editor, get_notifier
 from app.services import record_audit
@@ -25,11 +26,17 @@ def healthz(request: Request, session: Session = DbSession) -> JSONResponse:
     inside the container, and it exposes no certificate data.
     """
     scheduler: NotificationScheduler | None = getattr(request.app.state, "scheduler", None)
+    config: Settings = request.app.state.settings
     run = last_job_run(session)
     body: dict[str, Any] = {
         "status": "ok",
         "version": __version__,
         "database": "ok",
+        "email": {
+            "provider": config.email_provider,
+            "configured": config.email_configured,
+            "problems": config.email_warnings,
+        },
         "scheduler": {
             "running": bool(scheduler and scheduler.running),
             "next_run": scheduler.next_run_time.isoformat()
@@ -51,7 +58,7 @@ def healthz(request: Request, session: Session = DbSession) -> JSONResponse:
             "detail": run.detail,
         },
     }
-    if run is not None and not run.ok:
+    if (run is not None and not run.ok) or not config.email_configured:
         body["status"] = "degraded"
     return JSONResponse(body)
 

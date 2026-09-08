@@ -272,3 +272,45 @@ def test_the_sign_in_record_holds_no_credential(editor: Client, session: Session
     assert "eyJ" not in rendered
     assert "Bearer" not in rendered
     assert set(entry.details_json) == {"provider", "role", "subject"}
+
+
+# --- Severity: what stops the app, and what merely degrades ---------------
+
+
+def test_an_incomplete_email_configuration_does_not_stop_the_app():
+    """Email is not a security boundary. The board must keep serving."""
+    settings = Settings(
+        _env_file=None,
+        auth_mode="dev",
+        base_url="http://127.0.0.1:8087",
+        editor_emails=EDITOR,
+        email_provider="resend",
+        resend_api_key="re_a_key_with_no_from_address",
+        email_from="",
+    )
+    settings.validate_startup()  # must not raise
+
+    assert not settings.email_configured
+    assert any("EMAIL_FROM" in problem for problem in settings.email_warnings)
+
+
+def test_healthz_reports_email_as_degraded_but_serves(editor: Client, monkeypatch):
+    """A misconfigured mailer is visible without taking the board down."""
+    from app.config import Settings as ConfigSettings
+
+    monkeypatch.setattr(ConfigSettings, "email_configured", property(lambda self: False))
+    monkeypatch.setattr(
+        ConfigSettings,
+        "email_warnings",
+        property(lambda self: ["RESEND_API_KEY is not set, so no email can be sent."]),
+    )
+
+    assert editor.get("/").status_code == 200
+    body = editor.get("/healthz").json()
+    assert body["status"] == "degraded"
+    assert body["email"]["configured"] is False
+    assert "RESEND_API_KEY" in body["email"]["problems"][0]
+
+    settings_page = editor.get("/settings").text
+    assert "Not working." in settings_page
+    assert "RESEND_API_KEY is not set" in settings_page

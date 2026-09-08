@@ -154,10 +154,28 @@ class Settings(BaseSettings):
         return bool(self.smtp_host)
 
     @property
+    def email_warnings(self) -> list[str]:
+        """What is stopping email from working, in words, or nothing."""
+        if self.email_configured:
+            return []
+        problems: list[str] = []
+        if not self.from_address:
+            problems.append(
+                "EMAIL_FROM is not set, so no email or calendar invite can be "
+                "sent. Use an address on a domain verified in your provider; "
+                "it is also the organiser of every calendar invite."
+            )
+        if self.email_provider == "resend" and not self.resend_api_key:
+            problems.append("RESEND_API_KEY is not set, so no email can be sent.")
+        if self.email_provider == "smtp" and not self.smtp_host:
+            problems.append("SMTP_HOST is not set, so no email can be sent.")
+        return problems
+
+    @property
     def email_description(self) -> str:
         """One line describing how mail leaves, for the settings page."""
         if not self.email_configured:
-            return "not configured"
+            return "; ".join(self.email_warnings) or "not configured"
         if self.email_provider == "resend":
             return f"Resend, from {self.from_address}"
         return f"{self.smtp_host}:{self.smtp_port}, from {self.from_address}"
@@ -203,13 +221,11 @@ class Settings(BaseSettings):
                 "and set CF_ACCESS_TEAM and CF_ACCESS_AUD."
             )
             raise ConfigError(msg)
-        if self.email_provider == "resend" and self.resend_api_key and not self.email_from:
-            msg = (
-                "EMAIL_PROVIDER=resend requires EMAIL_FROM — the address "
-                "messages come from, on a domain verified in your Resend "
-                "account. It is also the organiser of every calendar invite."
-            )
-            raise ConfigError(msg)
+        # Email is not a security boundary, so an incomplete mail
+        # configuration must never stop the board from serving. It is
+        # reported here, on the settings page and on /healthz instead.
+        for warning in self.email_warnings:
+            print(f"notafter: warning: {warning}", file=sys.stderr)
         if not self.editor_email_set:
             print(
                 "notafter: warning: EDITOR_EMAILS is empty, so every "
