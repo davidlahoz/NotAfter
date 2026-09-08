@@ -12,13 +12,13 @@
     "audit": "npm audit --omit=dev"
   },
   "dependencies": {
-    "@types/node-forge": "^1.3.14",
     "asn1js": "3.0.6",
-    "node-forge": "^1.3.1",
+    "node-forge": "1.4.0",
     "pkijs": "3.3.0",
     "pvutils": "1.1.3"
   },
   "devDependencies": {
+    "@types/node-forge": "1.3.14",
     "esbuild": "0.25.12",
     "typescript": "5.9.3"
   },
