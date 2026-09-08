@@ -8,11 +8,11 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import Request
-from sqlmodel import Session
+from sqlmodel import Session, select
 
-from app.auth import AuthError, CloudflareAccessProvider, Role, User, _role_for
+from app.auth import AuthError, CloudflareAccessProvider, Role, _role_for
 from app.config import Settings
-from tests.conftest import EDITOR, Client
+from tests.conftest import EDITOR, VIEWER, Client
 from tests.fixtures import make_cert
 
 TEAM = "example"
@@ -81,7 +81,28 @@ def _request(token: str | None) -> Request:
 
 def test_valid_token_identifies_an_editor(cf_settings: Settings, signing_key):
     user = _provider(cf_settings, signing_key).authenticate(_request(_token(signing_key)))
-    assert user == User(email=EDITOR, role=Role.EDITOR)
+    assert user.email == EDITOR
+    assert user.role is Role.EDITOR
+    assert user.session_id.startswith("cf:")
+
+
+def test_the_session_id_never_contains_the_token(cf_settings: Settings, signing_key):
+    """It identifies the session for the audit trail; it is not a credential."""
+    token = _token(signing_key)
+    user = _provider(cf_settings, signing_key).authenticate(_request(token))
+    assert token not in user.session_id
+    assert user.session_id.removeprefix("cf:") not in token
+
+
+def test_one_session_keeps_one_id_and_a_new_one_differs(cf_settings: Settings, signing_key):
+    provider = _provider(cf_settings, signing_key)
+    token = _token(signing_key)
+    first = provider.authenticate(_request(token))
+    again = provider.authenticate(_request(token))
+    assert first.session_id == again.session_id
+
+    later = provider.authenticate(_request(_token(signing_key, expires_in=1200)))
+    assert later.session_id != first.session_id
 
 
 def test_wrong_audience_is_rejected(cf_settings: Settings, signing_key):
@@ -204,3 +225,50 @@ def test_dev_mode_refuses_a_public_base_url():
 )
 def test_dev_mode_is_allowed_on_loopback(base_url: str):
     Settings(_env_file=None, auth_mode="dev", base_url=base_url).validate_startup()
+
+
+# --- Sign-in is recorded, once per session --------------------------------
+
+
+def test_a_sign_in_is_recorded_once_per_session(editor: Client, session: Session):
+    from app.models import AuditLog
+
+    for _ in range(5):
+        assert editor.get("/").status_code == 200
+
+    entries = session.exec(select(AuditLog).where(AuditLog.action == "auth.signin")).all()
+    assert len(entries) == 1
+    assert entries[0].actor_email == EDITOR
+    assert entries[0].target == "session"
+    assert entries[0].details_json["role"] == "editor"
+    assert entries[0].details_json["provider"] == "dev"
+
+
+def test_each_person_is_recorded_separately(editor: Client, viewer: Client, session: Session):
+    from app.models import AuditLog
+
+    editor.get("/")
+    viewer.get("/")
+    recorded = {
+        entry.actor_email
+        for entry in session.exec(select(AuditLog).where(AuditLog.action == "auth.signin")).all()
+    }
+    assert recorded == {EDITOR, VIEWER}
+
+
+def test_the_audit_page_shows_who_signed_in(editor: Client):
+    editor.get("/")
+    body = editor.get("/audit").text
+    assert "auth.signin" in body
+    assert EDITOR in body
+
+
+def test_the_sign_in_record_holds_no_credential(editor: Client, session: Session):
+    from app.models import AuditLog
+
+    editor.get("/")
+    entry = session.exec(select(AuditLog).where(AuditLog.action == "auth.signin")).one()
+    rendered = str(entry.details_json)
+    assert "eyJ" not in rendered
+    assert "Bearer" not in rendered
+    assert set(entry.details_json) == {"provider", "role", "subject"}

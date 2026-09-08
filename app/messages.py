@@ -33,8 +33,8 @@ MESSAGES: Final[dict[str, str]] = {
 
 ERRORS: Final[dict[str, str]] = {
     "smtp-unconfigured": (
-        "Email is not configured, so nothing was sent. Set SMTP_HOST and "
-        "SMTP_FROM in the environment."
+        "Email is not configured, so nothing was sent. Set EMAIL_FROM and, "
+        "for Resend, RESEND_API_KEY in the environment."
     ),
     "no-teams": (
         "No Teams webhook is configured, so nothing was sent. Add a Workflows webhook URL below."

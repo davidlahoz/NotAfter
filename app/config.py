@@ -12,6 +12,7 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 AuthMode = Literal["cloudflare", "dev"]
+EmailProviderName = Literal["resend", "smtp"]
 
 #: Placeholder secret. Running in ``cloudflare`` mode with this value set is
 #: refused at start-up.
@@ -58,16 +59,34 @@ class Settings(BaseSettings):
     daily_run_time: str = "07:00"
     timezone: str = "UTC"
 
-    # --- SMTP -----------------------------------------------------------
+    # --- Email ----------------------------------------------------------
+    #: "resend" posts to the Resend API; "smtp" talks to a mail server.
+    email_provider: EmailProviderName = "resend"
+
+    #: The address every message comes from. It is also the ORGANIZER of
+    #: every calendar invite, so it must be a real mailbox on a domain the
+    #: provider is allowed to send for.
+    email_from: str = ""
+    email_from_name: str = "No After"
+
+    # Resend.
+    resend_api_key: str = ""
+    resend_api_url: str = "https://api.resend.com/emails"
+
+    # SMTP. Also the way to use Resend's relay: smtp.resend.com, username
+    # "resend", password the API key — which keeps calendar invites native.
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""
     smtp_password: str = ""
     smtp_use_starttls: bool = True
     smtp_use_tls: bool = False
-    smtp_from: str = ""
-    smtp_from_name: str = "NotAfter"
     smtp_timeout: int = 30
+
+    # Superseded by EMAIL_FROM / EMAIL_FROM_NAME; still read so that an
+    # existing .env keeps working.
+    smtp_from: str = ""
+    smtp_from_name: str = ""
 
     # --- Limits ---------------------------------------------------------
     max_upload_bytes: int = 256 * 1024
@@ -116,9 +135,32 @@ class Settings(BaseSettings):
             return False
 
     @property
-    def smtp_configured(self) -> bool:
+    def from_address(self) -> str:
+        """The address messages come from, honouring the older setting name."""
+        return self.email_from or self.smtp_from
+
+    @property
+    def from_name(self) -> str:
+        """The display name messages come from."""
+        return self.email_from_name or self.smtp_from_name or "No After"
+
+    @property
+    def email_configured(self) -> bool:
         """Whether enough is set for email to be attempted."""
-        return bool(self.smtp_host and self.smtp_from)
+        if not self.from_address:
+            return False
+        if self.email_provider == "resend":
+            return bool(self.resend_api_key)
+        return bool(self.smtp_host)
+
+    @property
+    def email_description(self) -> str:
+        """One line describing how mail leaves, for the settings page."""
+        if not self.email_configured:
+            return "not configured"
+        if self.email_provider == "resend":
+            return f"Resend, from {self.from_address}"
+        return f"{self.smtp_host}:{self.smtp_port}, from {self.from_address}"
 
     def validate_startup(self) -> None:
         """Fail fast on configurations that would be unsafe to run.
@@ -159,6 +201,13 @@ class Settings(BaseSettings):
                 "BASE_URL to a loopback address such as "
                 "http://127.0.0.1:8087, or switch to AUTH_MODE=cloudflare "
                 "and set CF_ACCESS_TEAM and CF_ACCESS_AUD."
+            )
+            raise ConfigError(msg)
+        if self.email_provider == "resend" and self.resend_api_key and not self.email_from:
+            msg = (
+                "EMAIL_PROVIDER=resend requires EMAIL_FROM — the address "
+                "messages come from, on a domain verified in your Resend "
+                "account. It is also the organiser of every calendar invite."
             )
             raise ConfigError(msg)
         if not self.editor_email_set:

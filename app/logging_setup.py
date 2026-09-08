@@ -30,6 +30,11 @@ _PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
         re.compile(r"-----BEGIN [^-]+-----.*?-----END [^-]+-----", re.DOTALL),
         "[redacted-pem]",
     ),
+    # Provider API keys, which arrive in upstream error text.
+    (
+        re.compile(r"\bre_[A-Za-z0-9_-]{8,}"),
+        "[redacted-api-key]",
+    ),
     # Bearer / JWT-looking strings.
     (
         re.compile(r"\beyJ[\w-]+\.[\w-]+\.[\w-]+"),

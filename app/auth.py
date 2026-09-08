@@ -8,17 +8,26 @@ trusted-header provider is added later.
 
 from __future__ import annotations
 
+import os
 import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol
+from hashlib import sha256
+from typing import Any, Protocol
 
 import jwt
 from fastapi import Depends, HTTPException, Request, status
 from jwt import PyJWKClient
+from sqlmodel import Session as DbSession
 
 from app.config import Settings, get_settings
+from app.db import get_session
 from app.logging_setup import logger
+from app.models import AuditLog
+
+#: Distinguishes this process's development sessions across restarts.
+_PROCESS_ID = f"{os.getpid()}"
 
 ACCESS_JWT_HEADER = "Cf-Access-Jwt-Assertion"
 ACCESS_JWT_COOKIE = "CF_Authorization"
@@ -38,6 +47,12 @@ class User:
 
     email: str
     role: Role
+    #: Identifies the Access token this request arrived with, so that a
+    #: sign-in can be recorded once per session rather than once per request.
+    #: Never the token itself.
+    session_id: str = ""
+    #: The identity provider's own id for the person, from the ``sub`` claim.
+    subject: str = ""
 
     @property
     def is_editor(self) -> bool:
@@ -65,6 +80,22 @@ class AuthProvider(Protocol):
     def authenticate(self, request: Request) -> User:
         """Return the user this request belongs to."""
         ...
+
+
+def _session_id(claims: dict[str, Any]) -> str:
+    """Name the token without quoting it.
+
+    Cloudflare issues a new token per sign-in, so the token id — or, failing
+    that, the subject and issue time together — identifies one session.
+    """
+    jti = str(claims.get("jti") or "")
+    if jti:
+        return f"cf:{jti}"
+    # No token id: the subject plus the validity window identifies the token
+    # closely enough, and includes `exp` so two sign-ins in the same second
+    # are still told apart.
+    material = f"{claims.get('sub')}:{claims.get('iat')}:{claims.get('exp')}"
+    return f"cf:{sha256(material.encode()).hexdigest()[:32]}"
 
 
 def _role_for(email: str, settings: Settings) -> Role:
@@ -137,7 +168,12 @@ class CloudflareAccessProvider:
                 "The Access token carried no email address, so the app cannot "
                 "tell who you are. Check the Access application's identity settings."
             )
-        return User(email=email, role=_role_for(email, self._settings))
+        return User(
+            email=email,
+            role=_role_for(email, self._settings),
+            session_id=_session_id(claims),
+            subject=str(claims.get("sub") or ""),
+        )
 
 
 class DevHeaderProvider:
@@ -157,7 +193,12 @@ class DevHeaderProvider:
         email = (request.headers.get(DEV_USER_HEADER) or self._settings.dev_user_email).strip()
         if not email:
             raise AuthError("Set the X-Dev-User header to a user's email address.")
-        return User(email=email, role=_role_for(email, self._settings))
+        return User(
+            email=email,
+            role=_role_for(email, self._settings),
+            session_id=f"dev:{_PROCESS_ID}:{email.lower()}",
+            subject=email.lower(),
+        )
 
 
 def build_provider(settings: Settings | None = None) -> AuthProvider:
@@ -175,15 +216,78 @@ def get_provider(request: Request) -> AuthProvider:
     return provider
 
 
-def current_user(request: Request) -> User:
+class SignInRecorder:
+    """Remembers which sessions have already been written to the audit trail.
+
+    Access authenticates every request, so there is no login page to hook.
+    The first request carrying a given token is the sign-in; every request
+    after it is the same session. Holding the ids in memory keeps this to one
+    database write per person per session instead of one per request.
+    """
+
+    def __init__(self, capacity: int = 4096) -> None:
+        self._seen: OrderedDict[str, None] = OrderedDict()
+        self._capacity = capacity
+        self._lock = threading.Lock()
+
+    def is_new(self, session_id: str) -> bool:
+        """Whether this session has not been recorded yet."""
+        if not session_id:
+            return False
+        with self._lock:
+            if session_id in self._seen:
+                self._seen.move_to_end(session_id)
+                return False
+            self._seen[session_id] = None
+            while len(self._seen) > self._capacity:
+                self._seen.popitem(last=False)
+            return True
+
+    def forget(self) -> None:
+        """Drop everything (used by the test suite)."""
+        with self._lock:
+            self._seen.clear()
+
+
+sign_ins = SignInRecorder()
+
+
+def current_user(request: Request, session: DbSession = Depends(get_session)) -> User:
     """FastAPI dependency: the authenticated viewer.
+
+    Also records the sign-in, once per session, so the audit trail answers
+    "who was here" as well as "who changed what".
 
     Raises:
         AuthError: 401 when the request carries no valid identity.
     """
     user = get_provider(request).authenticate(request)
     request.state.user = user
+    if sign_ins.is_new(user.session_id):
+        record_sign_in(session, user, request)
     return user
+
+
+def record_sign_in(session: DbSession, user: User, request: Request) -> None:
+    """Write one ``auth.signin`` line for a newly seen session.
+
+    Deliberately records no token, no cookie and no IP address — only who,
+    when, and which provider vouched for them.
+    """
+    provider: AuthProvider = request.app.state.auth_provider
+    session.add(
+        AuditLog(
+            actor_email=user.email,
+            action="auth.signin",
+            target="session",
+            details_json={
+                "provider": provider.name,
+                "role": user.role.value,
+                "subject": user.subject,
+            },
+        )
+    )
+    session.commit()
 
 
 def require_editor(user: User = Depends(current_user)) -> User:

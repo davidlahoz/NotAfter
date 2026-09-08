@@ -29,7 +29,11 @@ def test_pem_with_private_key_is_rejected_and_stores_nothing(
 
     assert response.status_code == 400
     assert session.exec(select(Certificate)).all() == []
-    assert session.exec(select(AuditLog)).all() == []
+    # Signing in is audited; refusing a file must add nothing beyond that.
+    certificate_entries = [
+        entry for entry in session.exec(select(AuditLog)).all() if entry.action != "auth.signin"
+    ]
+    assert certificate_entries == []
     logged = "\n".join(record.getMessage() for record in caplog.records)
     assert "PRIVATE KEY" not in logged
     assert "MII" not in logged

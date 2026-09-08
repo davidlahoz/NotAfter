@@ -131,7 +131,7 @@ class Notifier:
         outcomes: list[SendOutcome] = []
         recipients = self.recipients_for(cert, app_settings)
 
-        if Channel.EMAIL in channels and recipients and self._settings.smtp_configured:
+        if Channel.EMAIL in channels and recipients and self._settings.email_configured:
             outcomes.append(
                 await self._deliver(
                     session,
@@ -275,7 +275,7 @@ class Notifier:
         """
         outcomes: list[SendOutcome] = []
         recipients = self.calendar_recipients_for(cert, app_settings)
-        if not recipients or not self._settings.smtp_configured:
+        if not recipients or not self._settings.email_configured:
             return outcomes
 
         for kind in kinds:
@@ -327,8 +327,8 @@ class Notifier:
             kind,
             sequence=sequence,
             method=method,
-            organizer_email=self._settings.smtp_from,
-            organizer_name=self._settings.smtp_from_name,
+            organizer_email=self._settings.from_address,
+            organizer_name=self._settings.from_name,
             attendees=recipients,
             detail_url=self.detail_url(cert),
         )
@@ -372,15 +372,15 @@ class Notifier:
         await email_channel.send_message(
             email_channel.Message(
                 to=[to],
-                subject="NotAfter test email",
+                subject="No After — test email",
                 text=(
-                    "This is a test message from NotAfter.\n\n"
+                    "This is a test message from No After.\n\n"
                     "If you can read it, expiry notifications will reach this "
                     "address.\n\n"
                     f"{app_settings.contact_line}\n"
                 ),
                 html_body=(
-                    "<p>This is a test message from NotAfter.</p>"
+                    "<p>This is a test message from No After.</p>"
                     "<p>If you can read it, expiry notifications will reach "
                     "this address.</p>"
                 ),

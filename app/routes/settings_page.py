@@ -164,7 +164,7 @@ async def test_email(
     """Send a test email to the signed-in user."""
     _rate_limit(user, get_config())
     app_settings = load_app_settings(session)
-    if not get_config().smtp_configured:
+    if not get_config().email_configured:
         return RedirectResponse("/settings?err=smtp-unconfigured", status_code=303)
     try:
         await get_notifier(request).send_test_email(user.email, app_settings)
@@ -205,7 +205,7 @@ async def test_invite(
     """Send the signed-in user a sample calendar invite."""
     _rate_limit(user, get_config())
     app_settings = load_app_settings(session)
-    if not get_config().smtp_configured:
+    if not get_config().email_configured:
         return RedirectResponse("/settings?err=smtp-unconfigured", status_code=303)
 
     sample = session.exec(select(Certificate).limit(1)).first()

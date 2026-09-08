@@ -1,4 +1,16 @@
-"""Email delivery over SMTP, including calendar invites.
+"""Email delivery, including calendar invites.
+
+Two providers, chosen by ``EMAIL_PROVIDER``: Resend's HTTP API, and SMTP.
+They are behind one function, :func:`send_message`, so nothing above this
+module knows which is in use.
+
+The difference that matters is calendar invites. Over SMTP the invite is a
+``text/calendar; method=REQUEST`` alternative part, which is what makes
+Outlook and Google Calendar show accept and decline buttons. Resend's API has
+no way to express an alternative part, so there the invite travels as an
+attachment with the same content type — still openable, but not a native
+invite. Resend's own SMTP relay (``smtp.resend.com``) is the way to have
+both.
 
 Message bodies are built here so that the same wording reaches every reader:
 a short plain-text part and a matching HTML part, both explaining what the
@@ -7,17 +19,20 @@ certificate is, when it expires and what to do about it.
 
 from __future__ import annotations
 
+import base64
 import html
 import ssl
 from dataclasses import dataclass, field
 from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
+from typing import Any
 
 import aiosmtplib
+import httpx
 
 from app.config import Settings
 from app.formatting import countdown_phrase, format_date, status_for
-from app.logging_setup import logger
+from app.logging_setup import logger, redact
 from app.models import Certificate
 from app.notify import DeliveryError
 
@@ -52,10 +67,10 @@ def build_email(message: Message, settings: Settings) -> EmailMessage:
     attachment (which every other client can open).
     """
     email = EmailMessage()
-    email["From"] = formataddr((settings.smtp_from_name, settings.smtp_from))
+    email["From"] = formataddr((settings.from_name, settings.from_address))
     email["To"] = ", ".join(message.to)
     email["Subject"] = message.subject
-    email["Message-ID"] = make_msgid(domain=settings.smtp_from.split("@")[-1] or "notafter")
+    email["Message-ID"] = make_msgid(domain=settings.from_address.split("@")[-1] or "notafter")
     email["Auto-Submitted"] = "auto-generated"
 
     email.set_content(message.text)
@@ -88,20 +103,126 @@ def build_email(message: Message, settings: Settings) -> EmailMessage:
 
 
 async def send_message(message: Message, settings: Settings) -> None:
-    """Send one message.
+    """Send one message through the configured provider.
 
     Raises:
         DeliveryError: with a message that names the problem but never the
             credentials or the body.
     """
-    if not settings.smtp_configured:
+    if not settings.email_configured:
         raise DeliveryError(
-            "Email is not configured. Set SMTP_HOST and SMTP_FROM in the "
-            "environment and restart the app."
+            "Email is not configured. Set EMAIL_FROM and, for Resend, "
+            "RESEND_API_KEY in the environment, then restart the app."
         )
     if not message.to:
         raise DeliveryError("No recipient addresses are configured for this message.")
 
+    if settings.email_provider == "resend":
+        await _send_via_resend(message, settings)
+    else:
+        await _send_via_smtp(message, settings)
+
+
+async def _send_via_resend(
+    message: Message, settings: Settings, *, client: httpx.AsyncClient | None = None
+) -> None:
+    """POST the message to Resend.
+
+    Raises:
+        DeliveryError: naming the status Resend returned, never the API key.
+    """
+    payload: dict[str, Any] = {
+        "from": formataddr((settings.from_name, settings.from_address)),
+        "to": list(message.to),
+        "subject": message.subject,
+        "text": message.text,
+    }
+    if message.html_body:
+        payload["html"] = message.html_body
+
+    attachments = list(message.attachments)
+    if message.calendar is not None:
+        attachments.append(message.calendar)
+    if attachments:
+        payload["attachments"] = [
+            {
+                "filename": attachment.filename,
+                "content": base64.b64encode(attachment.content).decode("ascii"),
+                "content_type": _content_type_of(attachment),
+            }
+            for attachment in attachments
+        ]
+
+    owns_client = client is None
+    http = client or httpx.AsyncClient(timeout=20.0)
+    try:
+        response = await http.post(
+            settings.resend_api_url,
+            json=payload,
+            headers={"Authorization": f"Bearer {settings.resend_api_key}"},
+        )
+    except httpx.HTTPError as exc:
+        logger.warning("Resend request failed: %s", type(exc).__name__)
+        raise DeliveryError(
+            f"Resend could not be reached ({type(exc).__name__}). Check that "
+            "the container has outbound access to api.resend.com."
+        ) from exc
+    finally:
+        if owns_client:
+            await http.aclose()
+
+    if response.status_code >= 400:
+        raise DeliveryError(_resend_error(response))
+
+
+def _resend_error(response: httpx.Response) -> str:
+    """Turn a Resend error response into advice.
+
+    The upstream message is passed through :func:`redact` before it is used:
+    it ends up in ``notification_log.error`` and on the settings page, and an
+    API that echoed the key back would otherwise put it there.
+    """
+    detail = ""
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    if isinstance(body, dict):
+        detail = redact(str(body.get("message") or body.get("error") or ""))
+    hint = {
+        401: "The RESEND_API_KEY was not accepted. Check it in the Resend dashboard.",
+        403: "Resend refused the sender. Verify the EMAIL_FROM domain in Resend.",
+        422: "Resend rejected the message as invalid.",
+        429: "Resend is rate limiting. The next run will retry.",
+    }.get(response.status_code, "")
+    parts = [f"Resend replied {response.status_code}"]
+    if detail:
+        parts.append(detail)
+    if hint:
+        parts.append(hint)
+    return ". ".join(parts)
+
+
+def _content_type_of(attachment: Attachment) -> str:
+    """The MIME type for one attachment, with the iCalendar method if any."""
+    if attachment.subtype == "calendar":
+        method = attachment.method or "REQUEST"
+        return f"text/calendar; method={method}; charset=UTF-8"
+    return f"text/{attachment.subtype}; charset=UTF-8"
+
+
+async def _send_via_smtp(message: Message, settings: Settings) -> None:
+    """Hand the message to a mail server.
+
+    Raises:
+        DeliveryError: naming the server and the failure, never the password.
+    """
+    if not settings.smtp_host:
+        raise DeliveryError(
+            "EMAIL_PROVIDER is smtp but SMTP_HOST is not set. For Resend's "
+            "relay use smtp.resend.com with username 'resend' and your API "
+            "key as the password."
+        )
     email = build_email(message, settings)
     try:
         await aiosmtplib.send(
@@ -181,7 +302,7 @@ def render_notification(
         "What to do\n"
         "  1. Ask whoever issues this certificate for a replacement.\n"
         "  2. Install it in the system that uses it.\n"
-        "  3. Register the new file in NotAfter so this reminder moves on.\n\n"
+        "  3. Register the new file in No After so this reminder moves on.\n\n"
         f"Details: {detail_url}\n\n"
         f"{contact_line}\n"
     )
@@ -210,10 +331,10 @@ color:#232628;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;"
 <ol style="margin:0 0 20px;padding-left:20px;font-size:14px;line-height:1.6;">
 <li>Ask whoever issues this certificate for a replacement.</li>
 <li>Install it in the system that uses it.</li>
-<li>Register the new file in NotAfter so this reminder moves on.</li>
+<li>Register the new file in No After so this reminder moves on.</li>
 </ol>
 <p style="margin:0 0 20px;font-size:14px;">
-<a href="{html.escape(detail_url)}" style="color:#ff4700;">Open this certificate in NotAfter</a></p>
+<a href="{html.escape(detail_url)}" style="color:#ff4700;">Open this certificate in No After</a></p>
 <p style="margin:0;color:#6b7075;font-size:13px;">{html.escape(contact_line)}</p>
 </div></body></html>"""
     return subject, text, html_body

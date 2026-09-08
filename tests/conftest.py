@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app import db as db_module
+from app.auth import sign_ins
 from app.config import Settings
 from app.db import create_all
 from app.main import create_app
@@ -33,8 +34,8 @@ VIEWER = "viewer@example.org"
 # a Settings object. Every fixture below builds its own Settings explicitly.
 os.environ.setdefault("AUTH_MODE", "dev")
 os.environ.setdefault("EDITOR_EMAILS", EDITOR)
-os.environ.setdefault("SMTP_HOST", "smtp.example.org")
-os.environ.setdefault("SMTP_FROM", "notafter@example.org")
+os.environ.setdefault("RESEND_API_KEY", "re_test_key")
+os.environ.setdefault("EMAIL_FROM", "noafter@example.org")
 os.environ.setdefault("BASE_URL", APP_BASE_URL)
 
 
@@ -79,9 +80,10 @@ def test_settings(tmp_path: Any) -> Settings:
         database_url=f"sqlite:///{tmp_path}/test.db",
         base_url=APP_BASE_URL,
         secret_key="test-secret-key",
-        smtp_host="smtp.example.org",
-        smtp_from="notafter@example.org",
-        smtp_from_name="NotAfter",
+        email_provider="resend",
+        resend_api_key="re_test_key",
+        email_from="noafter@example.org",
+        email_from_name="No After",
         scheduler_enabled=False,
     )
 
@@ -96,7 +98,7 @@ def outbox(monkeypatch: pytest.MonkeyPatch) -> Outbox:
             from app.notify import DeliveryError
 
             raise DeliveryError("the mail server refused the message (test)")
-        if not settings.smtp_configured:
+        if not settings.email_configured:
             from app.notify import DeliveryError
 
             raise DeliveryError("Email is not configured.")
@@ -129,6 +131,7 @@ def outbox(monkeypatch: pytest.MonkeyPatch) -> Outbox:
 def app(test_settings: Settings, outbox: Outbox) -> Iterator[FastAPI]:
     """A fresh application on its own database."""
     limiter.reset()
+    sign_ins.forget()
     engine = db_module.build_engine(test_settings)
     db_module.set_engine(engine)
     create_all(engine)
