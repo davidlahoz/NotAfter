@@ -7,11 +7,12 @@ import datetime as dt
 import pytest
 from sqlmodel import Session, select
 
-from app.jobs import plan_for, run_daily_job
+from app.jobs import plan_for, run_daily_job, run_expiry_escalation
 from app.models import (
     AppSettings,
     Certificate,
     CertSource,
+    CertStatus,
     Channel,
     DeliveryStatus,
     NotificationLog,
@@ -272,3 +273,135 @@ async def test_the_run_of_notifications_over_a_certificate_s_last_two_months(
     assert "expires today" in subjects[5][1]
     # After the expiry date, one reminder a day and no gaps.
     assert days_notified[6:] == list(range(-1, -(len(days_notified) - 6) - 1, -1))
+
+
+# --- the hourly escalation while expired ----------------------------------
+
+
+def at(hour: int, minute: int = 0) -> dt.datetime:
+    """A moment today, so that `days` in `_make` means what it says."""
+    return dt.datetime.combine(dt.date.today(), dt.time(hour, minute))
+
+
+@pytest.fixture
+def teams_configured(session: Session, app_settings: AppSettings) -> AppSettings:
+    app_settings.teams_webhook_url = "https://example.org/webhook"
+    session.add(app_settings)
+    session.commit()
+    session.refresh(app_settings)
+    return app_settings
+
+
+async def test_an_expired_certificate_alerts_teams_every_hour(
+    session: Session, notifier: Notifier, outbox: Outbox, teams_configured: AppSettings
+):
+    _make(session, days=-1)
+    for hour in range(9, 15):
+        await run_expiry_escalation(session, notifier, now=at(hour))
+
+    assert len(outbox.cards) == 6
+    assert outbox.mail == [], "the hourly escalation is Teams only"
+
+
+async def test_running_the_escalation_twice_in_an_hour_sends_once(
+    session: Session, notifier: Notifier, outbox: Outbox, teams_configured: AppSettings
+):
+    _make(session, days=-3)
+    await run_expiry_escalation(session, notifier, now=at(9, 0))
+    await run_expiry_escalation(session, notifier, now=at(9, 30))
+    await run_expiry_escalation(session, notifier, now=at(9, 59))
+
+    assert len(outbox.cards) == 1
+
+
+async def test_the_interval_is_configurable(
+    session: Session, notifier: Notifier, outbox: Outbox, teams_configured: AppSettings
+):
+    teams_configured.expired_teams_every_hours = 6
+    session.add(teams_configured)
+    session.commit()
+    _make(session, days=-1)
+
+    for hour in range(0, 24):
+        await run_expiry_escalation(session, notifier, now=at(hour, 5))
+
+    assert len(outbox.cards) == 4  # 00:00, 06:00, 12:00, 18:00
+
+
+async def test_muting_stops_the_alerts(
+    session: Session, notifier: Notifier, outbox: Outbox, teams_configured: AppSettings
+):
+    cert = _make(session, days=-1)
+    await run_expiry_escalation(session, notifier, now=at(9, 0))
+    assert len(outbox.cards) == 1
+
+    cert.muted = True
+    session.add(cert)
+    session.commit()
+
+    for hour in range(10, 16):
+        await run_expiry_escalation(session, notifier, now=at(hour, 0))
+    assert len(outbox.cards) == 1
+
+
+async def test_archiving_stops_the_alerts(
+    session: Session, notifier: Notifier, outbox: Outbox, teams_configured: AppSettings
+):
+    cert = _make(session, days=-1)
+    await run_expiry_escalation(session, notifier, now=at(9, 0))
+
+    cert.status = CertStatus.ARCHIVED
+    session.add(cert)
+    session.commit()
+
+    await run_expiry_escalation(session, notifier, now=at(10, 0))
+    assert len(outbox.cards) == 1
+
+
+async def test_a_certificate_that_has_not_expired_is_left_alone(
+    session: Session, notifier: Notifier, outbox: Outbox, teams_configured: AppSettings
+):
+    _make(session, days=5)
+    _make(session, days=0, label="Expires today")
+    await run_expiry_escalation(session, notifier, now=at(9, 0))
+    assert outbox.cards == []
+
+
+async def test_the_daily_run_does_not_duplicate_the_hourly_teams_alert(
+    session: Session, notifier: Notifier, outbox: Outbox, teams_configured: AppSettings
+):
+    """Email still goes daily; Teams comes only from the escalation."""
+    _make(session, days=-1)
+    await run_expiry_escalation(session, notifier, now=at(9, 0))
+    assert len(outbox.cards) == 1
+
+    await run_daily_job(session, notifier)
+    assert len(outbox.cards) == 1, "the daily run must not send a second card"
+    assert len(outbox.mail) == 1, "but the daily email still goes out"
+
+
+async def test_setting_the_interval_to_zero_returns_teams_to_the_daily_run(
+    session: Session, notifier: Notifier, outbox: Outbox, teams_configured: AppSettings
+):
+    teams_configured.expired_teams_every_hours = 0
+    session.add(teams_configured)
+    session.commit()
+    _make(session, days=-1)
+
+    await run_expiry_escalation(session, notifier, now=at(9, 0))
+    assert outbox.cards == []
+
+    await run_daily_job(session, notifier)
+    assert len(outbox.cards) == 1
+
+
+async def test_the_card_says_how_to_stop_it(
+    session: Session, notifier: Notifier, outbox: Outbox, teams_configured: AppSettings
+):
+    _make(session, days=-2)
+    await run_expiry_escalation(session, notifier, now=at(9, 0))
+
+    blocks = outbox.cards[0]["attachments"][0]["content"]["body"]
+    text = " ".join(str(block.get("text", "")) for block in blocks)
+    assert "repeats every hour" in text
+    assert "renewed, archived or muted" in text

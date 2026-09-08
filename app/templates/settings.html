@@ -42,7 +42,15 @@
     <div class="checkbox">
       <input type="checkbox" id="notify_daily_when_expired" name="notify_daily_when_expired" value="1"
              {% if app_settings.notify_daily_when_expired %}checked{% endif %}>
-      <label for="notify_daily_when_expired">Keep notifying every day while a certificate is expired</label>
+      <label for="notify_daily_when_expired">Keep emailing every day while a certificate is expired</label>
+    </div>
+    <div class="field">
+      <label for="expired_teams_every_hours">Repeat the Teams alert every … hours once expired</label>
+      <input type="number" id="expired_teams_every_hours" name="expired_teams_every_hours"
+             value="{{ app_settings.expired_teams_every_hours }}" min="0" max="24">
+      <span class="hint">1 means every hour, around the clock. It stops as soon as the
+        certificate is renewed, archived or muted. Set it to 0 to leave Teams on the
+        daily schedule instead.</span>
     </div>
   </fieldset>
 
@@ -111,6 +119,9 @@ what to compare it against.</p>
   <dt>Email</dt><dd>{% if env.smtp_configured %}{{ env.smtp_host }}:{{ env.smtp_port }}, from {{ env.smtp_from }}{% else %}not configured{% endif %}</dd>
   <dt>Teams</dt><dd>{% if app_settings.teams_webhook_url %}a webhook is configured{% else %}not configured{% endif %}</dd>
   <dt>Daily run</dt><dd>{{ env.daily_run_time }} {{ env.timezone }}</dd>
+  <dt>Expired alerts</dt><dd>{% if app_settings.expired_teams_every_hours %}Teams,
+    every {{ app_settings.expired_teams_every_hours }} hour{{ '' if app_settings.expired_teams_every_hours == 1 else 's' }},
+    on the hour{% else %}on the daily run only{% endif %}</dd>
   <dt>Upload limit</dt><dd>{{ env.max_upload_bytes // 1024 }} KB</dd>
 </dl>
 

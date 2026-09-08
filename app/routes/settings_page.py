@@ -105,6 +105,7 @@ async def save_settings(
     remove_webhook: Annotated[str, Form()] = "",
     thresholds: Annotated[str, Form()] = "",
     notify_daily_when_expired: Annotated[str, Form()] = "",
+    expired_teams_every_hours: Annotated[int, Form()] = 1,
     warn_days: Annotated[int, Form()] = 60,
     critical_days: Annotated[int, Form()] = 30,
     contact_line: Annotated[str, Form()] = "",
@@ -127,6 +128,7 @@ async def save_settings(
         app_settings.teams_webhook_url = teams_webhook_url.strip()
     app_settings.thresholds = _parse_thresholds(thresholds)
     app_settings.notify_daily_when_expired = bool(notify_daily_when_expired)
+    app_settings.expired_teams_every_hours = min(max(expired_teams_every_hours, 0), 24)
     app_settings.warn_days = max(warn_days, critical_days)
     app_settings.critical_days = min(warn_days, critical_days)
     app_settings.contact_line = contact_line.strip() or app_settings.contact_line
@@ -145,6 +147,7 @@ async def save_settings(
             "thresholds": app_settings.thresholds,
             "teams_webhook_set": bool(app_settings.teams_webhook_url),
             "notify_daily_when_expired": app_settings.notify_daily_when_expired,
+            "expired_teams_every_hours": app_settings.expired_teams_every_hours,
             "warn_days": app_settings.warn_days,
             "critical_days": app_settings.critical_days,
         },

@@ -35,6 +35,9 @@ def healthz(request: Request, session: Session = DbSession) -> JSONResponse:
             "next_run": scheduler.next_run_time.isoformat()
             if scheduler and scheduler.next_run_time
             else None,
+            "next_expiry_escalation": scheduler.next_escalation_time.isoformat()
+            if scheduler and scheduler.next_escalation_time
+            else None,
         },
         "last_job": None
         if run is None

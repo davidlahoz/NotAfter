@@ -33,8 +33,13 @@ def build_card(
     contact_line: str,
     warn_days: int = 60,
     critical_days: int = 30,
+    repeat_hours: int = 0,
 ) -> dict[str, Any]:
-    """Build the Adaptive Card payload for one certificate."""
+    """Build the Adaptive Card payload for one certificate.
+
+    ``repeat_hours`` adds a line saying how often the alert will come back and
+    how to stop it, so nobody has to guess why it keeps arriving.
+    """
     status = status_for(days, warn_days=warn_days, critical_days=critical_days)
     facts = [
         {"title": "Expires", "value": format_date(cert.not_after)},
@@ -70,6 +75,20 @@ def build_card(
             "size": "Small",
         },
     ]
+    if repeat_hours:
+        every = "hour" if repeat_hours == 1 else f"{repeat_hours} hours"
+        body.append(
+            {
+                "type": "TextBlock",
+                "text": (
+                    f"This alert repeats every {every} until the certificate is "
+                    "renewed, archived or muted in NotAfter."
+                ),
+                "wrap": True,
+                "isSubtle": True,
+                "size": "Small",
+            }
+        )
 
     return {
         "type": "message",

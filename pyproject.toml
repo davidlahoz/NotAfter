@@ -41,7 +41,7 @@ ignore = [
     "S101", "S105", "S106",          # asserts and fake credentials are the point
     "D100", "D101", "D102", "D103",  # test names are the documentation
     "ANN001", "ANN003", "ANN201", "ANN202",
-    "DTZ005", "DTZ011",              # local "today" is what a reader would use
+    "DTZ001", "DTZ005", "DTZ011",    # the app stores naive UTC; tests match it
     "SLF001",
 ]
 "alembic/*" = ["D", "ANN", "INP001"]

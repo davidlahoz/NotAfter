@@ -8,9 +8,9 @@ produce a duplicate message.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from sqlmodel import Session, select
@@ -57,6 +57,18 @@ def threshold_key(threshold: int) -> str:
 def expired_key(day: date) -> str:
     """Dedupe key for one day's 'still expired' reminder."""
     return f"expired:{day.isoformat()}"
+
+
+def expired_hour_key(moment: datetime, every_hours: int) -> str:
+    """Dedupe key for one slot of the repeating expired alert.
+
+    The hour is floored to the interval, so the key is the same for every run
+    inside a slot. That is what stops a restart, a catch-up run or a manual
+    run from repeating an alert that has already gone out.
+    """
+    interval = max(every_hours, 1)
+    bucket = moment.hour - (moment.hour % interval)
+    return f"expired:{moment.date().isoformat()}T{bucket:02d}"
 
 
 class Notifier:
@@ -107,16 +119,19 @@ class Notifier:
         threshold: int,
         dedupe_key: str,
         app_settings: AppSettings,
+        channels: Collection[Channel] = (Channel.EMAIL, Channel.TEAMS),
     ) -> list[SendOutcome]:
-        """Send this certificate's notification on every configured channel.
+        """Send this certificate's notification on the given channels.
 
         A channel that already has a ``sent`` row for ``dedupe_key`` is
-        skipped; a channel with an ``error`` row is retried.
+        skipped; a channel with an ``error`` row is retried. ``channels``
+        narrows the send: while a certificate is expired, Teams is driven by
+        the hourly escalation instead of the daily run.
         """
         outcomes: list[SendOutcome] = []
         recipients = self.recipients_for(cert, app_settings)
 
-        if recipients and self._settings.smtp_configured:
+        if Channel.EMAIL in channels and recipients and self._settings.smtp_configured:
             outcomes.append(
                 await self._deliver(
                     session,
@@ -128,7 +143,7 @@ class Notifier:
                     lambda: self._send_expiry_email(cert, days, recipients, app_settings),
                 )
             )
-        if app_settings.teams_webhook_url:
+        if Channel.TEAMS in channels and app_settings.teams_webhook_url:
             outcomes.append(
                 await self._deliver(
                     session,
@@ -172,6 +187,7 @@ class Notifier:
             contact_line=app_settings.contact_line,
             warn_days=app_settings.warn_days,
             critical_days=app_settings.critical_days,
+            repeat_hours=(app_settings.expired_teams_every_hours if days < 0 else 0),
         )
         await teams_channel.post_card(app_settings.teams_webhook_url, card)
 

@@ -114,9 +114,16 @@ days left gets the 30-day reminder, not the 60-day one as well. Each is sent
 second run or a manual run cannot repeat one.
 
 So over a certificate's last two months that is six messages per channel, on
-six separate days. After the expiry date it becomes **one a day, every day**,
-until the certificate is renewed, archived or muted — turn that off with
-"Keep notifying every day while a certificate is expired" on the settings page.
+six separate days.
+
+**Once a certificate has expired the two channels part company.** Email stays
+on the daily run. Teams escalates: a second job runs **every hour, on the
+hour**, and re-posts the alert for every expired certificate until it is
+**renewed, archived or muted** — the card itself says so, so nobody has to
+work out how to make it stop. The interval is on the settings page ("Repeat
+the Teams alert every … hours once expired"); 0 puts Teams back on the daily
+run. Both jobs are idempotent, so a restart or a catch-up run inside the same
+hour sends nothing extra.
 
 Failures are retried on the next run and shown on the settings page and
 `/healthz`.

@@ -213,6 +213,9 @@ class AppSettings(SQLModel, table=True):
         sa_column=Column(JSON, nullable=False),
     )
     notify_daily_when_expired: bool = Field(default=True)
+    #: While a certificate is expired, repeat the Teams alert this often.
+    #: 0 turns the escalation off and leaves Teams on the daily schedule.
+    expired_teams_every_hours: int = Field(default=1)
     warn_days: int = Field(default=60)
     critical_days: int = Field(default=30)
     contact_line: str = Field(
