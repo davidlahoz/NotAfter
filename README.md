@@ -13,7 +13,7 @@ systems that use those certificates. It is only fed the files.
 parses, stores, logs or transmits a private key.** Everything else in the
 design gives way to that.
 
-- Open source, MIT licensed, self-hosted.
+- Self-hosted and MIT licensed. A private repository, not a public project.
 - One container, SQLite, no cloud dependency.
 - Server-rendered pages; the only JavaScript is the bundle that reads
   `.pfx` files inside your browser.
@@ -384,6 +384,48 @@ Run the browser test — which proves that only PEM leaves the page — with:
 .venv/bin/pytest -m browser
 ```
 
+`tests/test_pfx_extraction.py` runs the same TypeScript through Node against a
+`.pfx` in every encryption scheme, including the legacy ones Windows and
+`keytool` produce. Run those if you touch anything under `web/src/`.
+
+### Rules to keep
+
+Notes to a later self, each of which exists because ignoring it caused a
+problem once.
+
+**Never let a private key reach the server.** A change is wrong if it parses
+PKCS#12 server-side "just to read the certificate", writes an upload to disk
+or a temp directory even briefly, sends a password or a `.pfx` to the server,
+or adds a column, log line or error page that could carry key material. The
+tests in `tests/test_parsing.py`, `tests/test_upload_routes.py` and
+`tests/test_browser_extraction.py` exist to make those mistakes loud — do not
+weaken them to make a change pass.
+
+**Read every generated migration before running it.** `alembic revision
+--autogenerate` does not know about Python-side defaults, so it writes
+`NOT NULL` columns with no `server_default`. Those cannot be added to a table
+that already holds rows, and the failure appears as a crash-looping container
+against real data, not in the test suite. This has happened three times. Test
+each migration against a copy of the live database:
+
+```bash
+docker cp notafter:/data/notafter.db /tmp/copy.db
+DATABASE_URL="sqlite:////tmp/copy.db" .venv/bin/alembic upgrade head
+```
+
+**Keep the identifiers stable.** iCalendar `UID`s and `PRODID`, the Python
+package, the database file and the container all still say `notafter`. A
+calendar client matches an update to the event someone already holds by
+`UID`; renaming would orphan every invitation ever sent.
+
+**Fictional data only.** Fixtures, examples and screenshots use `example.org`
+and invented labels. Real hostnames and addresses live in `.env` and in the
+database, and neither is committed.
+
+**Explain, don't blame.** Every error a person can see should say what
+happened and what to do next. The board is read by people who do not know
+what a certificate is: no jargon, no abbreviations, no all-caps.
+
 ---
 
 ## Security
@@ -407,9 +449,6 @@ Run the browser test — which proves that only PEM leaves the page — with:
   digest. It needs outbound access to your SMTP server and, if you use it, the
   Teams webhook, and `api.resend.com` when email goes through Resend. Nothing
   else.
-
-Found something? Open an issue for anything that is not itself a
-vulnerability; for a vulnerability, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
