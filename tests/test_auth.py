@@ -185,3 +185,22 @@ def test_csrf_token_is_required(editor: Client):
     editor.get("/")
     response = editor.post("/settings", data={"contact_line": "no token"}, follow_redirects=False)
     assert response.status_code == 403
+
+
+def test_dev_mode_refuses_a_public_base_url():
+    """Header-trust authentication must never be reachable from outside."""
+    from app.config import ConfigError
+
+    settings = Settings(_env_file=None, auth_mode="dev", base_url="https://certs.example.org")
+    with pytest.raises(ConfigError) as caught:
+        settings.validate_startup()
+    assert "X-Dev-User" in str(caught.value)
+    assert "AUTH_MODE=cloudflare" in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    ["http://127.0.0.1:8087", "http://localhost:8000", "http://[::1]:8000"],
+)
+def test_dev_mode_is_allowed_on_loopback(base_url: str):
+    Settings(_env_file=None, auth_mode="dev", base_url=base_url).validate_startup()

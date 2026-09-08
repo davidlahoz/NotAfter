@@ -17,7 +17,7 @@ from app.models import (
     NotificationLog,
 )
 from app.notifier import Notifier
-from tests.conftest import Outbox
+from tests.conftest import APP_BASE_URL, Outbox
 
 
 def _make(session: Session, *, days: int, label: str = "Integration PROD") -> Certificate:
@@ -189,7 +189,7 @@ async def test_teams_card_is_posted_when_a_webhook_is_configured(
     card = outbox.cards[0]["attachments"][0]["content"]
     assert card["version"] == "1.4"
     assert any("7 days left" in str(block.get("text", "")) for block in card["body"])
-    assert card["actions"][0]["url"].startswith("https://certs.example.org/certificates/")
+    assert card["actions"][0]["url"].startswith(f"{APP_BASE_URL}/certificates/")
 
 
 async def test_recipients_include_the_owner_and_any_extras(
@@ -212,7 +212,7 @@ async def test_the_email_explains_what_to_do(
     message = outbox.mail[0]
     assert "What to do" in message.text
     assert "Ask whoever issues this certificate" in message.text
-    assert "https://certs.example.org/certificates/" in message.text
+    assert f"{APP_BASE_URL}/certificates/" in message.text
     assert "<html" in message.html
 
 

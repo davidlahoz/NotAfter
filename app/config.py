@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import sys
 from functools import lru_cache
+from ipaddress import ip_address
 from typing import Literal
+from urllib.parse import urlparse
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -103,6 +105,17 @@ class Settings(BaseSettings):
         return f"{self.cf_issuer}/cdn-cgi/access/certs"
 
     @property
+    def base_url_is_loopback(self) -> bool:
+        """Whether BASE_URL points at this machine and nowhere else."""
+        host = urlparse(self.base_url).hostname or ""
+        if host in {"localhost", "::1"}:
+            return True
+        try:
+            return ip_address(host).is_loopback
+        except ValueError:
+            return False
+
+    @property
     def smtp_configured(self) -> bool:
         """Whether enough is set for email to be attempted."""
         return bool(self.smtp_host and self.smtp_from)
@@ -138,6 +151,16 @@ class Settings(BaseSettings):
                     "'import secrets; print(secrets.token_urlsafe(48))'"
                 )
                 raise ConfigError(msg)
+        if self.auth_mode == "dev" and not self.base_url_is_loopback:
+            msg = (
+                "AUTH_MODE=dev takes the user's identity from an X-Dev-User "
+                "header, which anyone can forge, so it may only be used "
+                f"locally — but BASE_URL is {self.base_url!r}. Either set "
+                "BASE_URL to a loopback address such as "
+                "http://127.0.0.1:8087, or switch to AUTH_MODE=cloudflare "
+                "and set CF_ACCESS_TEAM and CF_ACCESS_AUD."
+            )
+            raise ConfigError(msg)
         if not self.editor_email_set:
             print(
                 "notafter: warning: EDITOR_EMAILS is empty, so every "

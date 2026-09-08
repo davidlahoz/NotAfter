@@ -12,12 +12,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
-os.environ.setdefault("AUTH_MODE", "dev")
-os.environ.setdefault("EDITOR_EMAILS", "editor@example.org")
-os.environ.setdefault("SMTP_HOST", "smtp.example.org")
-os.environ.setdefault("SMTP_FROM", "notafter@example.org")
-os.environ.setdefault("BASE_URL", "https://certs.example.org")
-
 from app import db as db_module
 from app.config import Settings
 from app.db import create_all
@@ -28,8 +22,20 @@ from app.notify import email as email_channel
 from app.notify import teams as teams_channel
 from app.security import CSRF_COOKIE, CSRF_HEADER, limiter
 
+#: AUTH_MODE=dev is loopback-only, so the app under test is configured as a
+#: local instance. The test client still speaks https to it (see `Client`).
+APP_BASE_URL = "http://127.0.0.1:8087"
+
 EDITOR = "editor@example.org"
 VIEWER = "viewer@example.org"
+
+# Defaults for anything that reads the process environment rather than taking
+# a Settings object. Every fixture below builds its own Settings explicitly.
+os.environ.setdefault("AUTH_MODE", "dev")
+os.environ.setdefault("EDITOR_EMAILS", EDITOR)
+os.environ.setdefault("SMTP_HOST", "smtp.example.org")
+os.environ.setdefault("SMTP_FROM", "notafter@example.org")
+os.environ.setdefault("BASE_URL", APP_BASE_URL)
 
 
 @dataclass
@@ -71,7 +77,7 @@ def test_settings(tmp_path: Any) -> Settings:
         auth_mode="dev",
         editor_emails=EDITOR,
         database_url=f"sqlite:///{tmp_path}/test.db",
-        base_url="https://certs.example.org",
+        base_url=APP_BASE_URL,
         secret_key="test-secret-key",
         smtp_host="smtp.example.org",
         smtp_from="notafter@example.org",
