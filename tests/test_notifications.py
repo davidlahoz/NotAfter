@@ -235,3 +235,40 @@ def _logs(session: Session, cert: Certificate) -> list[NotificationLog]:
             )
         ).all()
     )
+
+
+def test_the_expiry_day_itself_always_notifies():
+    """Day zero is not covered by the thresholds or by the expired reminders."""
+    cert = Certificate(label="x", not_after=dt.datetime.now())
+    plan = plan_for(cert, [60, 30, 14, 7, 1], today=dt.date.today(), notify_when_expired=True)
+    assert plan is not None
+    assert plan.days == 0
+    assert plan.dedupe_key == "t0"
+
+    # Even with the expired reminders switched off, and even if someone
+    # configures a threshold list without a small value in it.
+    quiet = plan_for(cert, [90], today=dt.date.today(), notify_when_expired=False)
+    assert quiet is not None
+    assert quiet.dedupe_key == "t0"
+
+
+async def test_the_run_of_notifications_over_a_certificate_s_last_two_months(
+    session: Session, notifier: Notifier, outbox: Outbox, app_settings: AppSettings
+):
+    """One card per rule, on the right day, and never the same one twice."""
+    cert = _make(session, days=60)
+    start = dt.date.today()
+    subjects: list[tuple[int, str]] = []
+
+    for offset in range(0, 65):
+        day = start + dt.timedelta(days=offset)
+        before = len(outbox.mail)
+        await run_daily_job(session, notifier, on_date=day)
+        for message in outbox.mail[before:]:
+            subjects.append(((cert.not_after.date() - day).days, message.subject))
+
+    days_notified = [days for days, _ in subjects]
+    assert days_notified[:6] == [60, 30, 14, 7, 1, 0]
+    assert "expires today" in subjects[5][1]
+    # After the expiry date, one reminder a day and no gaps.
+    assert days_notified[6:] == list(range(-1, -(len(days_notified) - 6) - 1, -1))

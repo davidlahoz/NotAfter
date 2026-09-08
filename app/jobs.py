@@ -21,6 +21,7 @@ from app.formatting import today as today_utc
 from app.logging_setup import logger
 from app.models import (
     EXPIRED_DAILY_THRESHOLD,
+    EXPIRY_DAY_THRESHOLD,
     Certificate,
     Channel,
     DeliveryStatus,
@@ -53,6 +54,11 @@ def plan_for(
 
     A certificate 30 days from expiry reports the 30-day threshold, not the
     60-day one it passed earlier.
+
+    Zero is always a threshold, whatever the configured list says: the day a
+    certificate stops working is the one day nobody should hear nothing. It is
+    not covered by the expired reminders either, which only begin once the
+    date has passed.
     """
     days = cert.days_left(today)
     if days < 0:
@@ -66,7 +72,8 @@ def plan_for(
             superseded=[],
         )
 
-    crossed = sorted(threshold for threshold in thresholds if days <= threshold)
+    effective = set(thresholds) | {EXPIRY_DAY_THRESHOLD}
+    crossed = sorted(threshold for threshold in effective if days <= threshold)
     if not crossed:
         return None
     nearest = crossed[0]

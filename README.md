@@ -102,13 +102,24 @@ fewer, red once expired. Both thresholds are configurable. "Days left" is
 never stored — it is worked out from the expiry date every time a page is
 rendered or a notification is considered.
 
-**Notifications.** Once a day the app looks at every active certificate and
-sends the nearest reminder it has just crossed — 60, 30, 14, 7 and 1 day by
-default. Only the nearest one: a certificate registered with 20 days left gets
-the 30-day reminder, not the 60-day one as well. Every send is recorded, and a
-unique constraint in the database means a restart, a second run or a manual
-run can never send the same reminder twice. Failures are retried on the next
-run and shown on the settings page and `/healthz`.
+**Notifications.** The job runs **once a day**, at `DAILY_RUN_TIME`. Each
+certificate gets **at most one message per run**, on every configured channel —
+so email and Teams carry the same reminder, on the same day.
+
+Which day? The nearest reminder it has just crossed — 60, 30, 14, 7 and 1 day
+before expiry by default, plus the expiry day itself, which is always notified
+whatever the list says. Only the nearest one: a certificate registered with 20
+days left gets the 30-day reminder, not the 60-day one as well. Each is sent
+**exactly once, ever** — a unique constraint in the database means a restart, a
+second run or a manual run cannot repeat one.
+
+So over a certificate's last two months that is six messages per channel, on
+six separate days. After the expiry date it becomes **one a day, every day**,
+until the certificate is renewed, archived or muted — turn that off with
+"Keep notifying every day while a certificate is expired" on the settings page.
+
+Failures are retried on the next run and shown on the settings page and
+`/healthz`.
 
 **Calendar invites.** Registering a certificate sends two all-day invites: one
 on the expiry date, one 30 days before it, each with reminders 7 days and 1

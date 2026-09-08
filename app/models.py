@@ -17,6 +17,9 @@ from sqlmodel import Field, SQLModel
 DEFAULT_THRESHOLDS: list[int] = [60, 30, 14, 7, 1]
 EXPIRED_DAILY_THRESHOLD = -1
 
+#: "Expires today". Always notified on, whatever thresholds are configured.
+EXPIRY_DAY_THRESHOLD = 0
+
 
 def utcnow() -> datetime:
     """Current UTC time, without a tzinfo (SQLite stores naive datetimes)."""
