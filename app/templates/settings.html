@@ -60,19 +60,20 @@
   <fieldset>
     <legend>Calendar invites</legend>
     <div class="field">
-      <label for="calendar_renew_lead_days">Put the “renew” event this many days before expiry</label>
+      <label for="calendar_renew_lead_days">Remind attendees to start renewing, this many days ahead</label>
       <input type="number" id="calendar_renew_lead_days" name="calendar_renew_lead_days"
              value="{{ app_settings.calendar_renew_lead_days }}" min="0" max="3650">
-      <span class="hint">Every certificate gets two all-day events: one on the expiry date,
-        and one this far ahead of it to start the renewal.</span>
+      <span class="hint">Every certificate gets one all-day event on its expiry date.
+        This is the earliest reminder that event carries — the nudge to begin asking for
+        the replacement.</span>
     </div>
     <div class="field">
-      <label for="calendar_alarm_days">Remind attendees this many days before each event</label>
+      <label for="calendar_alarm_days">And remind them again, this many days ahead</label>
       <input type="text" id="calendar_alarm_days" name="calendar_alarm_days"
              value="{{ app_settings.calendar_alarm_days | join(', ') }}">
-      <span class="hint">Alarms the attendee's own calendar fires, separated by commas.
-        Changing either of these re-sends the invites, so events already in people's
-        calendars move to the new dates rather than being duplicated.</span>
+      <span class="hint">Further alarms on the same event, separated by commas. Changing
+        either of these re-sends the invitations, so events already in people's calendars
+        move rather than being duplicated.</span>
     </div>
   </fieldset>
 

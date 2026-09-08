@@ -119,32 +119,33 @@ def test_attaching_a_different_expiry_needs_confirmation(
 # --- Calendar invites -----------------------------------------------------
 
 
-def test_registering_sends_two_invites(
+def test_registering_sends_one_invite_carrying_every_reminder(
     editor: Client, session: Session, outbox: Outbox, app_settings
 ):
+    """One event to accept, not two — the renewal lead is an alarm on it."""
     _register(editor, make_cert(days_until_expiry=200))
 
     invites = outbox.invites
-    assert len(invites) == 2
-    assert all(invite.method == "REQUEST" for invite in invites)
-    assert all(invite.to == ["calendar@example.org", "owner@example.org"] for invite in invites)
+    assert len(invites) == 1
+    invite = invites[0]
+    assert invite.method == "REQUEST"
+    assert invite.to == ["calendar@example.org", "owner@example.org"]
 
-    bodies = [invite.calendar.decode() for invite in invites if invite.calendar]
-    assert any("SUMMARY:Certificate expires: Integration PROD" in body for body in bodies)
-    assert any("SUMMARY:Renew certificate: Integration PROD" in body for body in bodies)
-    for body in bodies:
-        assert "METHOD:REQUEST" in body
-        assert "SEQUENCE:0" in body
-        assert "TRIGGER:-P7D" in body
-        assert "TRIGGER:-P1D" in body
-        # The library quotes a parameter value containing a space, per RFC 5545.
-        assert 'ORGANIZER;CN="No After":MAILTO:noafter@example.org' in body
+    body = invite.calendar.decode() if invite.calendar else ""
+    assert "SUMMARY:Certificate expires: Integration PROD" in body
+    assert "Renew certificate" not in body
+    assert body.count("BEGIN:VEVENT") == 1
+    assert "METHOD:REQUEST" in body
+    assert "SEQUENCE:0" in body
+    # The global renewal lead is 30 days, and the alarms are 7 and 1.
+    assert "TRIGGER:-P30D" in body
+    assert "TRIGGER:-P7D" in body
+    assert "TRIGGER:-P1D" in body
+    # The library quotes a parameter value containing a space, per RFC 5545.
+    assert 'ORGANIZER;CN="No After":MAILTO:noafter@example.org' in body
 
     stored = session.exec(select(CalendarInvite)).all()
-    assert {invite.uid for invite in stored} == {
-        f"cert-{stored[0].cert_id}-expiry@notafter",
-        f"cert-{stored[0].cert_id}-renew@notafter",
-    }
+    assert {invite.uid for invite in stored} == {f"cert-{stored[0].cert_id}-expiry@notafter"}
 
 
 def test_archiving_cancels_the_invites(
@@ -159,7 +160,7 @@ def test_archiving_cancels_the_invites(
     )
 
     cancels = outbox.invites
-    assert len(cancels) == 2
+    assert len(cancels) == 1
     for invite in cancels:
         assert invite.method == "CANCEL"
         body = invite.calendar.decode() if invite.calendar else ""
@@ -197,8 +198,8 @@ def test_renewal_supersedes_cancels_and_reinvites(
 
     cancels = [invite for invite in outbox.invites if invite.method == InviteMethod.CANCEL.value]
     requests = [invite for invite in outbox.invites if invite.method == InviteMethod.REQUEST.value]
-    assert len(cancels) == 2
-    assert len(requests) == 2
+    assert len(cancels) == 1
+    assert len(requests) == 1
     for invite in cancels:
         body = invite.calendar.decode() if invite.calendar else ""
         assert "SEQUENCE:1" in body
@@ -279,16 +280,13 @@ def test_the_renewal_event_follows_the_configured_lead_time(
     cert = _only(session)
     expiry = cert.not_after.date()
 
-    dates = {
-        invite.kind.value: invite.event_date
-        for invite in session.exec(select(CalendarInvite)).all()
-    }
-    assert dates["expiry"] == expiry
-    assert dates["renew"] == expiry - dt.timedelta(days=90)
+    invites = session.exec(select(CalendarInvite)).all()
+    assert [invite.kind.value for invite in invites] == ["expiry"]
+    assert invites[0].event_date == expiry
 
-    renew_body = next(body for body in _ics_bodies(outbox) if "Renew certificate" in body)
-    assert (expiry - dt.timedelta(days=90)).strftime("%Y%m%d") in renew_body
-    assert "in 90 days" in renew_body.replace("\r\n ", "")
+    body = _ics_bodies(outbox)[0]
+    assert "TRIGGER:-P90D" in body, "the lead time is the earliest alarm"
+    assert "90 days beforehand" in body.replace("\r\n ", "")
 
 
 def test_the_alarms_follow_the_configured_days(
@@ -303,6 +301,7 @@ def test_the_alarms_follow_the_configured_days(
         assert "TRIGGER:-P21D" in body
         assert "TRIGGER:-P3D" in body
         assert "TRIGGER:-P7D" not in body
+        assert "TRIGGER:-P30D" in body, "the renewal lead is still an alarm"
 
 
 async def test_changing_the_timing_moves_invites_people_already_have(
@@ -330,17 +329,18 @@ async def test_changing_the_timing_moves_invites_people_already_have(
     # Re-issued against the same UIDs with a higher SEQUENCE, so calendars
     # move the existing events instead of showing a second invitation.
     bodies = _ics_bodies(outbox)
-    assert len(bodies) == 2
-    for body in bodies:
-        assert f"UID:cert-{cert.id}-" in body
-        assert "SEQUENCE:1" in body
-        assert "METHOD:REQUEST" in body
-        assert "TRIGGER:-P14D" in body
+    assert len(bodies) == 1
+    body = bodies[0]
+    assert f"UID:cert-{cert.id}-expiry@notafter" in body
+    assert "SEQUENCE:1" in body
+    assert "METHOD:REQUEST" in body
+    assert "TRIGGER:-P45D" in body, "the new lead time"
+    assert "TRIGGER:-P14D" in body
+    assert "TRIGGER:-P2D" in body
 
-    renew = session.exec(
-        select(CalendarInvite).where(CalendarInvite.kind == InviteKind.RENEW)
-    ).one()
-    assert renew.event_date == cert.not_after.date() - dt.timedelta(days=45)
+    stored = session.exec(select(CalendarInvite)).one()
+    assert stored.kind is InviteKind.EXPIRY
+    assert stored.event_date == cert.not_after.date()
 
 
 async def test_saving_settings_without_touching_the_timing_sends_nothing(
@@ -364,6 +364,66 @@ async def test_saving_settings_without_touching_the_timing_sends_nothing(
 
 def test_the_settings_page_offers_both_timings(editor: Client, app_settings):
     body = editor.get("/settings").text
-    assert "Put the “renew” event this many days before expiry" in body
-    assert "Remind attendees this many days before each event" in body
+    assert "Remind attendees to start renewing, this many days ahead" in body
+    assert "And remind them again, this many days ahead" in body
     assert "Send an email and a Teams card this many days before expiry" in body
+    assert "one all-day event on its expiry date" in body
+
+
+async def test_an_existing_second_event_is_withdrawn_once(
+    editor: Client, session: Session, outbox: Outbox, app_settings, test_settings
+):
+    """Instances that predate the single-event design must not orphan it.
+
+    Somebody accepted that renewal event; if it simply stopped being updated
+    it would sit in their calendar for ever, drifting from the certificate.
+    """
+    from app.notifier import Notifier
+
+    _register(editor, make_cert(days_until_expiry=200))
+    cert = _only(session)
+
+    # A record from before the change, as an upgraded instance would have.
+    session.add(
+        CalendarInvite(
+            cert_id=cert.id or 0,
+            kind=InviteKind.RENEW,
+            uid=f"cert-{cert.id}-renew@notafter",
+            sequence=0,
+            event_date=cert.not_after.date() - dt.timedelta(days=30),
+            recipients=["calendar@example.org"],
+        )
+    )
+    session.commit()
+    outbox.mail.clear()
+
+    notifier = Notifier(test_settings)
+    await notifier.send_invites(session, cert, app_settings)
+
+    methods = sorted(invite.method or "" for invite in outbox.invites)
+    assert methods == ["CANCEL", "REQUEST"], "withdraw the old one, refresh the real one"
+    cancelled = next(i for i in outbox.invites if i.method == "CANCEL")
+    body = cancelled.calendar.decode() if cancelled.calendar else ""
+    assert f"UID:cert-{cert.id}-renew@notafter" in body
+    assert "SEQUENCE:1" in body
+
+    # And only once: a second run leaves it alone.
+    outbox.mail.clear()
+    await notifier.send_invites(session, cert, app_settings)
+    assert [i.method for i in outbox.invites] == ["REQUEST"]
+
+
+def test_a_certificate_never_produces_more_than_one_event(
+    editor: Client, session: Session, outbox: Outbox, app_settings
+):
+    _register(editor, make_cert(days_until_expiry=200))
+    cert = _only(session)
+
+    editor.post_form(f"/certificates/{cert.id}/resend-invites", {})
+    editor.post_form(f"/certificates/{cert.id}/resend-invites", {})
+
+    rows = session.exec(select(CalendarInvite)).all()
+    assert len(rows) == 1
+    assert rows[0].kind is InviteKind.EXPIRY
+    for body in _ics_bodies(outbox):
+        assert body.count("BEGIN:VEVENT") == 1

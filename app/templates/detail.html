@@ -45,9 +45,8 @@
   <dt>Notified</dt><dd>{{ notify_recipients | names('nobody') }}
     {%- if cert.recipients_replace_defaults %} (only these people){% endif %}</dd>
   <dt>Calendar</dt>
-  <dd>Expiry event on {{ cert.not_after | date }}, renewal event
-    {{ cert.renew_lead_days(app_settings) }} day{{ '' if cert.renew_lead_days(app_settings) == 1 else 's' }}
-    earlier; reminders {{ cert.alarm_days(app_settings) | join(' and ') }} day(s) before each.</dd>
+  <dd>One all-day event on {{ cert.not_after | date }}, reminding attendees
+    {{ calendar_alarms | join(', ') }} days beforehand.</dd>
   {% if cert.notes %}<dt>Notes</dt><dd>{{ cert.notes }}</dd>{% endif %}
   {% if previous or successor %}
     <dt>Renewal chain</dt>
@@ -103,16 +102,19 @@
              value="{{ cert.reminder_days | join(', ') if cert.reminder_days else '' }}"
              placeholder="{{ app_settings.thresholds | join(', ') }}">
       <span class="hint">The expiry day itself always sends one, whatever this says.</span></div>
-    <div class="field"><label for="calendar_renew_lead_days">“Renew” event, this many days before expiry</label>
+    <div class="field"><label for="calendar_renew_lead_days">Start-the-renewal reminder, this many days before expiry</label>
       <input type="number" id="calendar_renew_lead_days" name="calendar_renew_lead_days" min="0" max="3650"
              value="{{ cert.calendar_renew_lead_days if cert.calendar_renew_lead_days is not none else '' }}"
-             placeholder="{{ app_settings.calendar_renew_lead_days }}"></div>
+             placeholder="{{ app_settings.calendar_renew_lead_days }}">
+      <span class="hint">The earliest of the event's reminders — when somebody should
+        begin asking for the replacement.</span></div>
     <div class="field"><label for="calendar_alarm_days">Calendar reminders, this many days before each event</label>
       <input type="text" id="calendar_alarm_days" name="calendar_alarm_days"
              value="{{ cert.calendar_alarm_days | join(', ') if cert.calendar_alarm_days else '' }}"
              placeholder="{{ app_settings.calendar_alarm_days | join(', ') }}">
-      <span class="hint">Changing either calendar field re-sends this certificate's invites, so
-        the events already in people's calendars move rather than being duplicated.</span></div>
+      <span class="hint">The other reminders on the same event. Changing either calendar
+        field re-sends this certificate's invitation, so the event already in people's
+        calendars moves rather than being duplicated.</span></div>
     <div class="checkbox">
       <input type="checkbox" id="muted" name="muted" value="1"{% if cert.muted %} checked{% endif %}>
       <label for="muted">Mute reminders for this certificate</label></div>

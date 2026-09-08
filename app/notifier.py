@@ -278,17 +278,25 @@ class Notifier:
         app_settings: AppSettings,
         *,
         method: InviteMethod = InviteMethod.REQUEST,
-        kinds: tuple[InviteKind, ...] = (InviteKind.EXPIRY, InviteKind.RENEW),
+        kinds: tuple[InviteKind, ...] = (InviteKind.EXPIRY,),
     ) -> list[SendOutcome]:
-        """Send (or cancel) this certificate's two calendar events.
+        """Send (or cancel) this certificate's calendar event.
 
+        One event, on the expiry date, carrying every reminder as an alarm.
         SEQUENCE is incremented on every send, which is what makes calendar
-        clients replace the previous version of the event.
+        clients replace the previous version rather than add another.
+
+        Instances that predate this carry a second, separate renewal event;
+        it is withdrawn the first time this runs, so nobody is left holding an
+        orphan that no longer moves with the certificate.
         """
         outcomes: list[SendOutcome] = []
         recipients = self.calendar_recipients_for(cert, app_settings)
         if not recipients or not self._settings.email_configured:
             return outcomes
+
+        if method is InviteMethod.REQUEST and InviteKind.RENEW not in kinds:
+            await self._retire_separate_renewal_event(session, cert, app_settings)
 
         for kind in kinds:
             record = _find_invite(session, cert, kind)
@@ -369,11 +377,32 @@ class Notifier:
             self._settings,
         )
 
+    async def _retire_separate_renewal_event(
+        self, session: Session, cert: Certificate, app_settings: AppSettings
+    ) -> None:
+        """Withdraw the old second event, once, if this record ever had one."""
+        record = _find_invite(session, cert, InviteKind.RENEW)
+        if record is None or record.cancelled:
+            return
+        await self.send_invites(
+            session,
+            cert,
+            app_settings,
+            method=InviteMethod.CANCEL,
+            kinds=(InviteKind.RENEW,),
+        )
+
     async def cancel_invites(
         self, session: Session, cert: Certificate, app_settings: AppSettings
     ) -> list[SendOutcome]:
-        """Withdraw both calendar events for a certificate."""
-        return await self.send_invites(session, cert, app_settings, method=InviteMethod.CANCEL)
+        """Withdraw a certificate's calendar events, including any legacy one."""
+        return await self.send_invites(
+            session,
+            cert,
+            app_settings,
+            method=InviteMethod.CANCEL,
+            kinds=(InviteKind.EXPIRY, InviteKind.RENEW),
+        )
 
     # -- tests -----------------------------------------------------------
 

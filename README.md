@@ -159,17 +159,20 @@ hour sends nothing extra.
 Failures are retried on the next run and shown on the settings page and
 `/healthz`.
 
-**Calendar invites.** Registering a certificate sends two all-day invites: one
-on the expiry date, and one ahead of it to start the renewal — 30 days by
-default, and the attendee's calendar reminds them 7 days and 1 day before each
-event. All three numbers are on the settings page.
+**Calendar invites.** Registering a certificate sends **one** invitation: an
+all-day event on the expiry date, with everyone who should know as attendees,
+carrying every reminder as an alarm — 30 days ahead to start the renewal, then
+7 days and 1 day, all configurable globally and per certificate. "Start
+renewing" and "this expires soon" are the same event seen from different
+distances, so a second invitation would only mean a second thing to accept and
+keep in step.
 
-They have stable UIDs, so replacing or archiving the certificate updates or
-cancels the events people already have in Outlook or Google Calendar rather
-than leaving them behind. Changing the timings re-sends the invites for the
-same reason: a calendar only moves an event when it receives an update for
-that UID, so without it the new setting would apply to future registrations
-only and quietly disagree with every invite already out there.
+The UID is stable, so replacing or archiving the certificate updates or
+cancels the event people already have in Outlook or Google Calendar rather
+than leaving it behind. Changing a timing re-sends the invitation for the same
+reason: a calendar only moves an event when it receives an update for that
+UID, so without it the new setting would apply to future registrations only
+and quietly disagree with what is already out there.
 
 ---
 

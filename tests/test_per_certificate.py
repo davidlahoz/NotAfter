@@ -83,7 +83,7 @@ def test_one_calendar_event_carries_every_attendee(
     editor.post_form(f"/certificates/{cert.id}/resend-invites", {})
 
     invites = outbox.invites
-    assert len(invites) == 2, "one invite per event, not one per person"
+    assert len(invites) == 1, "one invite for the certificate, not one per person"
     for invite in invites:
         body = invite.calendar.decode() if invite.calendar else ""
         attendees = [line for line in body.splitlines() if "ATTENDEE" in line or "MAILTO" in line]
@@ -151,16 +151,17 @@ def test_a_certificate_can_have_its_own_calendar_timing(
     session.refresh(cert)
     assert cert.renew_lead_days(app_settings) == 120
 
-    renew = session.exec(
-        select(CalendarInvite).where(CalendarInvite.kind == InviteKind.RENEW)
+    stored = session.exec(
+        select(CalendarInvite).where(CalendarInvite.kind == InviteKind.EXPIRY)
     ).one()
-    assert renew.event_date == cert.not_after.date() - dt.timedelta(days=120)
-    assert renew.sequence == 1, "an update to the same UID, not a new invitation"
+    assert stored.event_date == cert.not_after.date()
+    assert stored.sequence == 1, "an update to the same UID, not a new invitation"
 
-    for invite in outbox.invites:
-        body = invite.calendar.decode() if invite.calendar else ""
-        assert "TRIGGER:-P30D" in body
-        assert "TRIGGER:-P5D" in body
+    assert len(outbox.invites) == 1
+    body = outbox.invites[0].calendar.decode() if outbox.invites[0].calendar else ""
+    assert "TRIGGER:-P120D" in body, "this certificate's own lead time"
+    assert "TRIGGER:-P30D" in body
+    assert "TRIGGER:-P5D" in body
 
 
 # --- Its own people --------------------------------------------------------

@@ -1,8 +1,13 @@
-"""iCalendar invites for certificate expiry and renewal.
+"""iCalendar invites for certificate expiry.
 
-Two all-day events per certificate, with stable UIDs derived from the record
-id so that later updates and cancellations replace the original event in
-Outlook and Google Calendar rather than creating duplicates.
+One all-day event per certificate, on the expiry date, carrying every reminder
+as a VALARM — including the one that says to start the renewal. A second event
+would mean a second invitation to accept and a second thing to keep in step,
+which is what alarms exist to avoid.
+
+The UID is derived from the record id and is stable, so later updates and
+cancellations replace the event in Outlook and Google Calendar rather than
+creating duplicates.
 """
 
 from __future__ import annotations
@@ -41,6 +46,16 @@ def event_date_for(
     return expiry - timedelta(days=max(renew_lead_days, 0))
 
 
+def alarms_for(renew_lead_days: int, alarm_days: Sequence[int]) -> list[int]:
+    """Every reminder the one event carries, furthest ahead first.
+
+    The renewal lead time is just the earliest alarm: "start renewing" and
+    "this expires soon" are the same event seen from different distances.
+    """
+    days = {day for day in (*alarm_days, renew_lead_days) if day > 0}
+    return sorted(days, reverse=True)
+
+
 def event_summary(cert: Certificate, kind: InviteKind) -> str:
     """Title shown in the attendee's calendar."""
     if kind is InviteKind.EXPIRY:
@@ -53,9 +68,12 @@ def _description(cert: Certificate, kind: InviteKind, detail_url: str, renew_lea
     expiry = format_date(cert.not_after)
     subject = cert.subject_cn or cert.label
     if kind is InviteKind.EXPIRY:
+        plural = "" if renew_lead_days == 1 else "s"
         opening = (
-            f'The certificate "{cert.label}" ({subject}) expires today, {expiry}.'
+            f'The certificate "{cert.label}" ({subject}) expires on {expiry}.'
             " Systems that rely on it may stop working until it is replaced."
+            f" This event reminds you {renew_lead_days} day{plural} beforehand,"
+            " which is when to start the renewal."
         )
     else:
         opening = (
@@ -126,7 +144,12 @@ def build_calendar(
         event.add("attendee", attendee, encode=False)
 
     if method is InviteMethod.REQUEST:
-        for days in sorted({day for day in alarm_days if day > 0}, reverse=True):
+        reminders = (
+            alarms_for(renew_lead_days, alarm_days)
+            if kind is InviteKind.EXPIRY
+            else sorted({day for day in alarm_days if day > 0}, reverse=True)
+        )
+        for days in reminders:
             alarm = Alarm()
             alarm.add("action", "DISPLAY")
             alarm.add("description", event_summary(cert, kind))

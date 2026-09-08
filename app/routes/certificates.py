@@ -28,6 +28,7 @@ from app.models import (
 from app.notifier import Notifier
 from app.notify import DeliveryError
 from app.notify import email as email_channel
+from app.notify.ics import alarms_for
 from app.parsing import AmbiguousLeaf, CertificateFacts, UploadRejected, parse_upload
 from app.routes.deps import (
     DbSession,
@@ -288,6 +289,9 @@ def certificate_detail(
         {
             "cert": cert,
             "notify_recipients": get_notifier(request).recipients_for(cert, app_settings),
+            "calendar_alarms": alarms_for(
+                cert.renew_lead_days(app_settings), cert.alarm_days(app_settings)
+            ),
             "previous": previous,
             "successor": successor,
             "notifications": notifications,
