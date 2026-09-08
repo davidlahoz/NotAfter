@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import mimetypes
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -26,6 +27,11 @@ from app.security import CsrfCookieMiddleware, SecurityHeadersMiddleware, csrf_p
 from app.templating import render
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+# Not every Python installation knows these, and a font served as
+# application/octet-stream is one a caching proxy will not compress.
+mimetypes.add_type("font/woff2", ".woff2")
+mimetypes.add_type("image/svg+xml", ".svg")
 
 
 def _wants_json(request: Request) -> bool:

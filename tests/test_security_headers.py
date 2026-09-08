@@ -76,6 +76,14 @@ def test_static_assets_reference_no_external_origin():
         assert not found, f"{asset.name} refers to {found[:3]}"
 
 
+def test_fonts_are_served_with_their_own_content_type(editor: Client):
+    """application/octet-stream would stop a proxy compressing them."""
+    for name in ("inter-variable.woff2", "nabla-wordmark.woff2"):
+        response = editor.get(f"/static/fonts/{name}")
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "font/woff2", name
+
+
 def test_vendored_fonts_are_served_by_the_app():
     """No CDN, no Google Fonts: the font files are in the repository."""
     fonts = APP_DIR / "static" / "fonts"
