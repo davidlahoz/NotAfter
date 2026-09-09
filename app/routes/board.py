@@ -11,7 +11,7 @@ from app.db import load_app_settings
 from app.formatting import today
 from app.models import CertStatus
 from app.routes.deps import DbSession, Viewer
-from app.services import list_certificates
+from app.services import group_by_status, list_certificates
 from app.templating import render
 
 router = APIRouter()
@@ -32,6 +32,11 @@ def board(
         "board.html",
         {
             "certificates": certificates,
+            "groups": group_by_status(
+                certificates,
+                warn_days=app_settings.warn_days,
+                critical_days=app_settings.critical_days,
+            ),
             "app_settings": app_settings,
             "archived_count": archived_count,
             "today": today(),

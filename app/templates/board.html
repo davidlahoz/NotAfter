@@ -3,26 +3,37 @@
 <h2>Certificates, soonest to expire first</h2>
 
 {% if certificates %}
-<div class="board">
-  {% for cert in certificates %}{% include "_entry.html" %}{% endfor %}
-</div>
+{% for group in groups %}
+  <section class="group level-{{ group.status.level.value }}">
+    <h3 class="group-head">
+      <span class="group-word">{{ group.status.word }}</span>
+      <span class="group-count">{{ group.count }}</span>
+    </h3>
+    <p class="group-sentence">{{ group.status.sentence }}</p>
+    <div class="board">
+      {% for cert in group.certificates %}{% include "_entry.html" %}{% endfor %}
+    </div>
+  </section>
+{% endfor %}
 {% else %}
 <p class="empty">Nothing is registered yet.
 {% if user and user.is_editor %}<a href="/certificates/new">Register the first certificate</a>.{% else %}
 Ask someone with edit rights to add the first one.{% endif %}</p>
 {% endif %}
 
-<h2>What the colours mean</h2>
+<h2>Where the lines fall</h2>
 <section class="legend">
+  <p>Each heading above says what to do. These are the days at which one
+  becomes the next.</p>
   <dl>
     <dt class="swatch-ok">In date</dt>
-    <dd>More than {{ app_settings.warn_days }} days left. Nothing to do.</dd>
+    <dd>more than {{ app_settings.warn_days }} days left</dd>
     <dt class="swatch-warning">Plan the renewal</dt>
-    <dd>{{ app_settings.warn_days }} days or fewer. Start asking for the replacement now — issuing one can take weeks.</dd>
+    <dd>{{ app_settings.warn_days }} days or fewer</dd>
     <dt class="swatch-critical">Renew now</dt>
-    <dd>{{ app_settings.critical_days }} days or fewer. Get the replacement in place this week.</dd>
+    <dd>{{ app_settings.critical_days }} days or fewer</dd>
     <dt class="swatch-expired">Expired</dt>
-    <dd>The date has passed. Anything using this certificate may have stopped working.</dd>
+    <dd>the date has passed</dd>
   </dl>
   {% if archived_count %}<p><a href="/archive">{{ archived_count }} archived certificate{{ '' if archived_count == 1 else 's' }}</a></p>{% endif %}
 </section>

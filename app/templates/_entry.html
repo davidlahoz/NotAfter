@@ -5,7 +5,9 @@
   {% include "_countdown.html" %}
   <div>
     <h3 class="entry-name"><a href="/certificates/{{ cert.id }}">{{ cert.label }}</a></h3>
-    <p class="entry-status"><span class="status-word">{{ state.word }}.</span> {{ state.sentence }}</p>
+    {% if show_status_word %}
+      <p class="entry-status"><span class="status-word">{{ state.word }}.</span></p>
+    {% endif %}
     <p class="entry-facts">
       <span>Valid until {{ cert.not_after | date }}</span>
       {% if cert.subject_cn %}<span>{{ cert.subject_cn }}</span>{% endif %}

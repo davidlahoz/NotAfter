@@ -306,6 +306,46 @@ a:hover { text-decoration-thickness: 2px; }
 .entry-facts .env { color: var(--ink); }
 .unverified { color: var(--amber); }
 
+/* --- Status groups ------------------------------------------------------
+ * The word and the sentence belong to the group, not to every row in it: at
+ * twenty certificates the same sentence repeated twenty times stops being
+ * read, and nothing tells you how many are in trouble.
+ */
+
+.group { margin-bottom: var(--s6); }
+
+.group-head {
+  display: flex;
+  align-items: baseline;
+  margin: 0 0 var(--s1);
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+.group-count {
+  margin-left: 0.45em;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  color: var(--muted);
+}
+.group-count::before { content: "·"; margin-right: 0.45em; }
+
+.level-ok .group-word { color: var(--green); }
+.level-warning .group-word { color: var(--amber); }
+.level-critical .group-word,
+.level-expired .group-word { color: var(--red); }
+
+.group-sentence {
+  margin: 0 0 var(--s3);
+  max-width: var(--measure);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+/* Rows inside a group are tighter: they carry no sentence of their own. */
+.group .entry { padding: var(--s4) 0; }
+.group .entry-name { margin-bottom: var(--s1); }
+
 /* --- Legend ------------------------------------------------------------- */
 
 .legend { max-width: var(--measure); color: var(--muted); font-size: var(--text-sm); }
@@ -377,6 +417,30 @@ thead th {
   white-space: nowrap;
 }
 tbody tr:last-child td { border-bottom: 0; }
+
+/* Audit details: pairs on a line, not a bulleted list down the page. */
+.pairs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--s4);
+}
+.pairs li { overflow-wrap: anywhere; }
+.pairs .k { color: var(--muted); }
+.pairs .k::after { content: ":"; }
+
+/* A timestamp is one thing; it should not wrap into three lines. */
+td.when { white-space: nowrap; color: var(--muted); }
+
+.audit { table-layout: fixed; }
+.audit .col-when { width: 9.5rem; }
+.audit .col-who { width: 14rem; }
+.audit .col-what { width: 17rem; }
+.audit td { overflow-wrap: anywhere; }
+.audit .target { color: var(--muted); }
+.audit .target a { color: var(--ink); }
 
 .status-sent { color: var(--green); }
 .status-error { color: var(--red); }

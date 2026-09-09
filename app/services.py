@@ -6,13 +6,14 @@ so that every change is audited in the same way.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
 
 from sqlmodel import Session, col, select
 
 from app.auth import User
-from app.formatting import clean_text
+from app.formatting import Status, StatusLevel, clean_text, status_for, today
 from app.models import (
     AuditLog,
     Certificate,
@@ -94,6 +95,55 @@ def sample_certificate(session: Session) -> Certificate:
         verified=True,
         not_after=utcnow() + timedelta(days=30),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class StatusGroup:
+    """Certificates that share a status, and what that status means."""
+
+    status: Status
+    certificates: list[Certificate]
+
+    @property
+    def count(self) -> int:
+        """How many certificates are in this state."""
+        return len(self.certificates)
+
+
+def group_by_status(
+    certificates: list[Certificate],
+    *,
+    warn_days: int,
+    critical_days: int,
+    on_date: date | None = None,
+) -> list[StatusGroup]:
+    """Group the board by urgency, most urgent first.
+
+    Written for a board with fifty rows rather than five. Ungrouped, the
+    explanatory sentence repeats on every row until it stops being read, and
+    nothing answers "is anything on fire" without counting.
+    """
+    reference = on_date or today()
+    grouped: dict[StatusLevel, list[Certificate]] = {}
+    meanings: dict[StatusLevel, Status] = {}
+    for cert in certificates:
+        state = status_for(
+            cert.days_left(reference), warn_days=warn_days, critical_days=critical_days
+        )
+        grouped.setdefault(state.level, []).append(cert)
+        meanings.setdefault(state.level, state)
+
+    order = (
+        StatusLevel.EXPIRED,
+        StatusLevel.CRITICAL,
+        StatusLevel.WARNING,
+        StatusLevel.OK,
+    )
+    return [
+        StatusGroup(status=meanings[level], certificates=grouped[level])
+        for level in order
+        if level in grouped
+    ]
 
 
 def find_by_fingerprint(session: Session, fingerprint: str) -> Certificate | None:

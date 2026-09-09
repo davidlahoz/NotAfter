@@ -7,16 +7,37 @@ recorded here — only what changed and who changed it.</p>
 
 {% if entries %}
 <div class="table-scroll">
-<table>
-  <thead><tr><th>When</th><th>Who</th><th>What</th><th>Target</th><th>Details</th></tr></thead>
+<table class="audit">
+  <colgroup>
+    <col class="col-when"><col class="col-who"><col class="col-what"><col>
+  </colgroup>
+  <thead><tr>
+    <th scope="col">When</th><th scope="col">Who</th>
+    <th scope="col">What</th><th scope="col">Details</th>
+  </tr></thead>
   <tbody>
   {% for entry in entries %}
+    {% set cert_id = entry.target.removeprefix('certificate:') %}
     <tr>
-      <td>{{ entry.at | datetime }}</td>
+      <td class="when">{{ entry.at | compact }}</td>
       <td>{{ entry.actor_email }}</td>
-      <td>{{ entry.action }}</td>
-      <td>{{ entry.target }}</td>
-      <td class="mono">{{ entry.details_json }}</td>
+      <td>
+        <span title="{{ entry.action }}">{{ entry.action | action }}</span>
+        {% if entry.target.startswith('certificate:') and cert_id | int in labels %}
+          <span class="target">— <a href="/certificates/{{ cert_id }}">{{ labels[cert_id | int] }}</a></span>
+        {% elif entry.target and entry.target not in ('settings', 'session') %}
+          <span class="target">— {{ entry.target }}</span>
+        {% endif %}
+      </td>
+      <td>
+        {% set omit_keys = ['label'] if entry.target.startswith('certificate:') else [] %}
+        {% set pairs = entry.details_json | details(omit=omit_keys) %}
+        {% if pairs %}
+          <ul class="pairs">
+          {% for name, value in pairs %}<li><span class="k">{{ name }}</span> {{ value }}</li>{% endfor %}
+          </ul>
+        {% else %}<span class="muted">—</span>{% endif %}
+      </td>
     </tr>
   {% endfor %}
   </tbody>

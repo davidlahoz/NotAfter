@@ -243,8 +243,19 @@ check the date and mark it verified.</p>
   <thead><tr><th scope="col">When</th><th scope="col">Who</th><th scope="col">What</th><th scope="col">Details</th></tr></thead>
   <tbody>
   {% for entry in audit %}
-    <tr><td>{{ entry.at | datetime }}</td><td>{{ entry.actor_email }}</td>
-        <td>{{ entry.action }}</td><td class="mono">{{ entry.details_json }}</td></tr>
+    <tr>
+      <td class="when">{{ entry.at | compact }}</td>
+      <td>{{ entry.actor_email }}</td>
+      <td><span title="{{ entry.action }}">{{ entry.action | action }}</span></td>
+      <td>
+        {% set pairs = entry.details_json | details(omit=['label']) %}
+        {% if pairs %}
+          <ul class="pairs">
+          {% for name, value in pairs %}<li><span class="k">{{ name }}</span> {{ value }}</li>{% endfor %}
+          </ul>
+        {% else %}<span class="muted">—</span>{% endif %}
+      </td>
+    </tr>
   {% endfor %}
   </tbody>
 </table>

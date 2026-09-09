@@ -7,6 +7,7 @@ computed here from ``not_after``; it is never stored.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from enum import StrEnum
@@ -136,3 +137,92 @@ def clean_text(value: str, *, limit: int = 200) -> str:
     it contains a newline.
     """
     return value.translate(_CONTROL).strip()[:limit]
+
+
+#: What each audit action was, said in words. The raw identifier stays on the
+#: row as a title attribute, because an audit trail has to stay precise.
+AUDIT_ACTIONS: dict[str, str] = {
+    "auth.signin": "Signed in",
+    "certificate.create": "Registered a certificate",
+    "certificate.update": "Changed a certificate",
+    "certificate.attach": "Attached the certificate file",
+    "certificate.renew": "Registered a replacement",
+    "certificate.archive": "Archived a certificate",
+    "certificate.restore": "Restored a certificate",
+    "calendar.resend": "Re-sent the calendar invitation",
+    "calendar.retimed": "Changed the calendar timing",
+    "notification.test": "Sent a test notification",
+    "settings.update": "Changed the settings",
+    "settings.test": "Sent a test message",
+    "settings.test_failed": "A test message failed",
+    "job.run": "Ran the notification job",
+}
+
+#: Field names as a reader would say them.
+_DETAIL_LABELS: dict[str, str] = {
+    "not_after": "expires",
+    "fingerprint_sha256": "fingerprint",
+    "recorded_expiry": "date recorded by hand",
+    "certificate_expiry": "date in the certificate",
+    "confirmed_replacement": "replacement confirmed",
+    "superseded_by": "replaced by record",
+    "new_expiry": "new expiry",
+    "teams_webhook_set": "Teams webhook",
+    "notify_daily_when_expired": "daily while expired",
+    "expired_teams_every_hours": "Teams repeat (hours)",
+    "calendar_recipients": "calendar recipients",
+    "certificates_checked": "certificates checked",
+    "notifications_sent": "notifications sent",
+    "certificates_updated": "certificates updated",
+    "renew_lead_days": "renewal reminder (days)",
+    "alarm_days": "calendar alarms (days)",
+    "reminder_days": "reminder days",
+    "recipients_replace_defaults": "replaces the default recipients",
+    "http_status": "reply",
+    "warn_days": "amber at (days)",
+    "critical_days": "red at (days)",
+}
+
+
+def describe_action(action: str) -> str:
+    """An audit action in words, falling back to the raw identifier."""
+    return AUDIT_ACTIONS.get(action, action)
+
+
+def format_details(details: dict[str, object], omit: Sequence[str] = ()) -> list[tuple[str, str]]:
+    """Turn an audit entry's stored fields into readable pairs.
+
+    The raw mapping used to be rendered straight into the page, so people
+    read Python: quoted keys, ``True``, and a full 64-character fingerprint
+    that pushed everything else out of the row. ``omit`` drops fields the row
+    already states elsewhere.
+    """
+    pairs: list[tuple[str, str]] = []
+    for key, value in details.items():
+        if key in omit:
+            continue
+        name = _DETAIL_LABELS.get(key, key.replace("_", " "))
+        pairs.append((name, _format_detail_value(key, value)))
+    return pairs
+
+
+def _format_detail_value(key: str, value: object) -> str:
+    """One field's value, short enough to sit on a row."""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value) if value else "none"
+    text = str(value)
+    if "fingerprint" in key and len(text) > 20:
+        # Enough to recognise, not enough to fill the row.
+        return f"{text[:16]}…"
+    if len(text) > 80:
+        return f"{text[:79]}…"
+    return text
+
+
+def format_datetime_compact(value: datetime | None) -> str:
+    """``8 Sep 2026, 14:45`` — a form that fits a table column."""
+    if value is None:
+        return "—"
+    return f"{value.day} {value:%b %Y}, {value:%H:%M}"

@@ -6,7 +6,9 @@ notifications and their calendar events have been cancelled.</p>
 
 {% if certificates %}
 <div class="board">
+  {% with show_status_word = True %}
   {% for cert in certificates %}{% include "_entry.html" %}{% endfor %}
+{% endwith %}
 </div>
 {% else %}
 <p class="empty">Nothing has been archived.</p>

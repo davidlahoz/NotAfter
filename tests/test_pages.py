@@ -36,14 +36,38 @@ def test_board_sorts_by_soonest_expiry(viewer: Client, session: Session, app_set
 def test_board_shows_the_countdown_and_the_plain_sentence(
     viewer: Client, session: Session, app_settings
 ):
+    """The sentence is on the group now, but a reader still meets it."""
     _add(session, "Integration PROD", 12, subject_cn="edi.example.org", environment="PROD")
     body = viewer.get("/").text
     assert "12" in body
     assert "days left" in body
-    assert "Renew now." in body
+    assert "Renew now" in body
     assert "Get the replacement in place this week." in body
     assert "edi.example.org" in body
     assert "PROD" in body
+
+
+def test_the_board_says_a_status_once_however_many_share_it(
+    viewer: Client, session: Session, app_settings
+):
+    """Repeated per row it becomes wallpaper; the eye stops reading it."""
+    for index in range(4):
+        _add(session, f"Urgent {index}", 5 + index)
+    body = viewer.get("/").text
+
+    sentence = "Get the replacement in place this week."
+    assert body.count(sentence) == 1, "once for the group, not once per row"
+    assert '<span class="group-count">4</span>' in body
+
+
+def test_groups_run_most_urgent_first(viewer: Client, session: Session, app_settings):
+    _add(session, "Fine", 300)
+    _add(session, "Expired one", -3)
+    _add(session, "Urgent", 4)
+    _add(session, "Soon", 50)
+    body = viewer.get("/").text
+    order = [body.index(word) for word in ("Expired", "Renew now", "Plan the renewal", "In date")]
+    assert order == sorted(order)
 
 
 def test_board_formats_the_date_in_words(viewer: Client, session: Session, app_settings):
@@ -52,11 +76,12 @@ def test_board_formats_the_date_in_words(viewer: Client, session: Session, app_s
     assert f"Valid until {expected}" in viewer.get("/").text
 
 
-def test_board_explains_the_colours(viewer: Client, session: Session, app_settings):
+def test_board_explains_where_the_lines_fall(viewer: Client, session: Session, app_settings):
     body = viewer.get("/").text
-    assert "What the colours mean" in body
+    assert "Where the lines fall" in body
     assert "In date" in body and "Expired" in body
     assert "Renew now" in body and "Plan the renewal" in body
+    assert f"{app_settings.warn_days} days or fewer" in body
 
 
 def test_the_board_carries_no_standing_advice(viewer: Client, session: Session, app_settings):
@@ -291,3 +316,78 @@ def test_settings_page_shows_the_exact_teams_payload(
     assert "Show the JSON that is posted" in body
     assert "application/vnd.microsoft.card.adaptive" in body
     assert "AdaptiveCard" in body
+
+
+# --- The audit trail is for people to read --------------------------------
+
+
+def test_the_audit_trail_shows_no_python_repr(
+    editor: Client, session: Session, outbox, app_settings
+):
+    """It used to render the stored mapping straight into the page."""
+    from tests.fixtures import make_cert
+
+    editor.post_files(
+        "/certificates/new/upload",
+        files={"file": ("c.pem", make_cert("edi.example.org").pem, "application/octet-stream")},
+        data={"label": "Integration PROD"},
+    )
+    body = editor.get("/audit").text
+
+    assert "{'label'" not in body
+    assert "'source':" not in body
+    assert "True}" not in body
+    assert "&#39;" not in body, "no escaped Python quotes either"
+
+
+def test_the_audit_trail_names_the_certificate_and_links_it(
+    editor: Client, session: Session, outbox, app_settings
+):
+    from tests.fixtures import make_cert
+
+    editor.post_files(
+        "/certificates/new/upload",
+        files={"file": ("c.pem", make_cert().pem, "application/octet-stream")},
+        data={"label": "Integration PROD"},
+    )
+    cert = session.exec(select(Certificate)).one()
+    body = editor.get("/audit").text
+
+    assert "Registered a certificate" in body, "not the raw action identifier"
+    assert f'<a href="/certificates/{cert.id}">Integration PROD</a>' in body
+    assert f"certificate:{cert.id}<" not in body, "the internal id is not shown"
+
+
+def test_a_fingerprint_is_shortened_in_the_audit_trail(
+    editor: Client, session: Session, outbox, app_settings
+):
+    from tests.fixtures import make_cert
+
+    editor.post_files(
+        "/certificates/new/upload",
+        files={"file": ("c.pem", make_cert().pem, "application/octet-stream")},
+        data={"label": "Integration PROD"},
+    )
+    cert = session.exec(select(Certificate)).one()
+    full = cert.fingerprint_sha256 or ""
+    body = editor.get("/audit").text
+
+    assert full not in body, "64 characters filled the row and told nobody anything"
+    assert f"{full[:16]}…" in body
+
+
+def test_the_certificate_name_is_not_said_twice_in_one_row(
+    editor: Client, session: Session, outbox, app_settings
+):
+    from tests.fixtures import make_cert
+
+    editor.post_files(
+        "/certificates/new/upload",
+        files={"file": ("c.pem", make_cert().pem, "application/octet-stream")},
+        data={"label": "Integration PROD"},
+    )
+    body = editor.get("/audit").text
+    row = body[
+        body.index("Registered a certificate") : body.index("Registered a certificate") + 700
+    ]
+    assert row.count("Integration PROD") == 1

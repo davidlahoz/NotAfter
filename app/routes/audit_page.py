@@ -7,13 +7,27 @@ from sqlmodel import Session, col, desc, select
 from starlette.responses import HTMLResponse
 
 from app.auth import User
-from app.models import AuditLog
+from app.models import AuditLog, Certificate
 from app.routes.deps import DbSession, Editor
 from app.templating import render
 
 router = APIRouter(tags=["audit"])
 
 PAGE_SIZE = 100
+
+
+def _labels_for(session: Session, entries: list[AuditLog]) -> dict[int, str]:
+    """Certificate names for the rows that name one, so ids stay internal."""
+    ids = {
+        int(entry.target.removeprefix("certificate:"))
+        for entry in entries
+        if entry.target.startswith("certificate:")
+        and entry.target.removeprefix("certificate:").isdigit()
+    }
+    if not ids:
+        return {}
+    found = session.exec(select(Certificate).where(col(Certificate.id).in_(ids))).all()
+    return {cert.id: cert.label for cert in found if cert.id is not None}
 
 
 @router.get("/audit", response_class=HTMLResponse)
@@ -34,11 +48,13 @@ def audit_trail(
         ).all()
     )
     has_next = len(entries) > PAGE_SIZE
+    shown = entries[:PAGE_SIZE]
     return render(
         request,
         "audit.html",
         {
-            "entries": entries[:PAGE_SIZE],
+            "entries": shown,
+            "labels": _labels_for(session, shown),
             "page": page,
             "has_next": has_next,
             "title": "Audit trail",
