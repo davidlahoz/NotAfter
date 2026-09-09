@@ -289,6 +289,7 @@ def certificate_detail(
         {
             "cert": cert,
             "notify_recipients": get_notifier(request).recipients_for(cert, app_settings),
+            "email_configured": get_config(request).email_configured,
             "calendar_alarms": alarms_for(
                 cert.renew_lead_days(app_settings), cert.alarm_days(app_settings)
             ),

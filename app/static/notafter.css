@@ -230,6 +230,22 @@ a:hover { text-decoration-thickness: 2px; }
 
 .entry:last-child { border-bottom: 0; }
 
+/* The label used to be the only thing you could click, which is a small
+   target on a tall row and a smaller one on a phone. The link is stretched
+   over the row instead — but the facts are lifted back above it, so a
+   hostname or an address can still be selected and copied. */
+.entry { position: relative; }
+.entry:hover { background: #efefec; }
+.entry:focus-within { background: #efefec; }
+
+.entry-name a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.entry-facts { position: relative; z-index: 1; width: fit-content; max-width: 100%; }
+
 .entry {
   display: grid;
   grid-template-columns: 7.5rem minmax(0, 1fr);
@@ -305,6 +321,14 @@ a:hover { text-decoration-thickness: 2px; }
 }
 .entry-facts .env { color: var(--ink); }
 .unverified { color: var(--amber); }
+
+.summary {
+  margin: 0 0 var(--s5);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.summary .attention { color: var(--red); }
 
 /* --- Status groups ------------------------------------------------------
  * The word and the sentence belong to the group, not to every row in it: at

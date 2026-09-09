@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import datetime as dt
+from pathlib import Path
 
 from sqlmodel import Session, select
 
 from app.models import AuditLog, Certificate, CertSource
 from tests.conftest import Client
 from tests.fixtures import make_cert
+
+APP_STATIC = Path(__file__).resolve().parent.parent / "app" / "static"
 
 
 def _add(session: Session, label: str, days: int, **kwargs) -> Certificate:
@@ -391,3 +394,66 @@ def test_the_certificate_name_is_not_said_twice_in_one_row(
         body.index("Registered a certificate") : body.index("Registered a certificate") + 700
     ]
     assert row.count("Integration PROD") == 1
+
+
+# --- The whole row, the summary, and empty states -------------------------
+
+
+def test_the_whole_row_is_a_link_target(viewer: Client, session: Session, app_settings):
+    """The label alone is a small target on a tall row, and smaller on a phone."""
+    _add(session, "Integration PROD", 12)
+    body = viewer.get("/").text
+    assert '<article class="entry' in body
+
+    css = (APP_STATIC / "notafter.css").read_text()
+    assert ".entry-name a::after" in css, "the link is stretched over the row"
+    assert ".entry { position: relative; }" in css
+    # ...but the facts stay selectable rather than sitting under the overlay.
+    assert ".entry-facts { position: relative; z-index: 1;" in css
+
+
+def test_the_board_answers_how_many_need_attention(viewer: Client, session: Session, app_settings):
+    _add(session, "Expired one", -2)
+    _add(session, "Urgent", 5)
+    _add(session, "Fine", 300)
+    body = viewer.get("/").text
+    assert "3 tracked" in body
+    assert "2 need attention today" in body
+    assert "<title>2 need attention" in body, "a pinned tab is worth glancing at"
+
+
+def test_a_calm_board_says_so(viewer: Client, session: Session, app_settings):
+    _add(session, "Fine", 300)
+    body = viewer.get("/").text
+    assert "all in date" in body
+    assert "need attention" not in body
+
+
+def test_an_empty_board_says_what_to_do(editor: Client, app_settings):
+    body = editor.get("/").text
+    assert "nothing to expire" in body
+    assert "Register the first certificate" in body
+    assert "type in the date if you do not have it" in body
+
+
+def test_an_empty_history_says_why_it_is_empty(
+    editor: Client, session: Session, outbox, app_settings, monkeypatch
+):
+    """Saying nothing has been sent is not useful; the reason is."""
+    from app.config import Settings as ConfigSettings
+
+    cert = _add(session, "Integration PROD", 12)
+    monkeypatch.setattr(ConfigSettings, "email_configured", property(lambda self: False))
+    body = editor.get(f"/certificates/{cert.id}").text
+    assert "because email is not configured" in body
+
+
+def test_a_muted_certificate_explains_its_silence(
+    editor: Client, session: Session, outbox, app_settings
+):
+    cert = _add(session, "Quiet", 12)
+    cert.muted = True
+    session.add(cert)
+    session.commit()
+    body = editor.get(f"/certificates/{cert.id}").text
+    assert "Reminders are muted" in body

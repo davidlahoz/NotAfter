@@ -161,7 +161,9 @@ what to compare it against.</p>
   <dt>Failures</dt><dd class="{{ 'status-error' if last_run.failures else 'status-sent' }}">{{ last_run.failures }}</dd>
   <dt>Detail</dt><dd>{{ last_run.detail }}</dd>
 </dl>
-{% else %}<p class="muted">The job has not run yet.</p>{% endif %}
+{% else %}<p class="empty">The job has not run yet. It runs once a day at
+{{ env.daily_run_time }} {{ env.timezone }}, and “Run the notification job now” above
+does the same thing immediately.</p>{% endif %}
 
 <h2>Recent problems</h2>
 {% if problems %}
@@ -181,5 +183,6 @@ what to compare it against.</p>
 </table>
 </div>
 <p class="muted small">Failed notifications are retried on the next daily run.</p>
-{% else %}<p class="muted">Nothing has failed.</p>{% endif %}
+{% else %}<p class="empty">Nothing has failed. Anything a provider refuses shows up
+here, with the reason it gave, and is retried on the next run.</p>{% endif %}
 {% endblock %}

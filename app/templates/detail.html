@@ -213,7 +213,14 @@ check the date and mark it verified.</p>
   </tbody>
 </table>
 </div>
-{% else %}<p class="empty">Nothing has been sent for this certificate yet.</p>{% endif %}
+{% else %}<p class="empty">
+  {% if not email_configured %}Nothing has been sent, because email is not configured —
+    see <a href="/settings">settings</a>.
+  {% elif cert.muted %}Reminders are muted for this certificate, so nothing has been sent.
+  {% elif cert.status.value == 'archived' %}This certificate is archived, so it sends nothing.
+  {% else %}Nothing yet. The first message goes out when this certificate reaches
+    {{ cert.thresholds(app_settings) | first }} days left, at the daily run.{% endif %}
+</p>{% endif %}
 
 <h3>Calendar invites</h3>
 {% if invites %}
@@ -234,7 +241,12 @@ check the date and mark it verified.</p>
   </tbody>
 </table>
 </div>
-{% else %}<p class="empty">No calendar invites have been sent for this certificate.</p>{% endif %}
+{% else %}<p class="empty">
+  {% if not email_configured %}No invitation has been sent, because email is not configured —
+    see <a href="/settings">settings</a>.
+  {% else %}No invitation has been sent yet. One goes out when a certificate is registered,
+    and again whenever its timing or its people change.{% endif %}
+</p>{% endif %}
 
 <h3>History</h3>
 {% if audit %}
@@ -260,7 +272,7 @@ check the date and mark it verified.</p>
   </tbody>
 </table>
 </div>
-{% else %}<p class="empty">Nothing recorded yet.</p>{% endif %}
+{% else %}<p class="empty">Nothing has changed since this certificate was registered.</p>{% endif %}
 {% endblock %}
 
 {% block scripts %}<script src="/static/upload.js" defer></script>{% endblock %}

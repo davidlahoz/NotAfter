@@ -3,6 +3,12 @@
 <h2>Certificates, soonest to expire first</h2>
 
 {% if certificates %}
+<p class="summary">
+  {{ certificates | length }} tracked{% if needing_attention %} ·
+  <span class="attention">{{ needing_attention }} need{{ 's' if needing_attention == 1 else '' }} attention today</span>{% else %} ·
+  all in date{% endif %}
+</p>
+
 {% for group in groups %}
   <section class="group level-{{ group.status.level.value }}">
     <h3 class="group-head">
@@ -16,8 +22,9 @@
   </section>
 {% endfor %}
 {% else %}
-<p class="empty">Nothing is registered yet.
-{% if user and user.is_editor %}<a href="/certificates/new">Register the first certificate</a>.{% else %}
+<p class="empty">Nothing is registered yet, so there is nothing to expire.
+{% if user and user.is_editor %}<a href="/certificates/new">Register the first certificate</a> —
+you can upload the file, or just type in the date if you do not have it.{% else %}
 Ask someone with edit rights to add the first one.{% endif %}</p>
 {% endif %}
 
