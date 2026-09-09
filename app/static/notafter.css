@@ -354,6 +354,13 @@ a:hover { text-decoration-thickness: 2px; }
 }
 .group-count::before { content: "·"; margin-right: 0.45em; }
 
+.group-threshold {
+  margin-left: 0.45em;
+  font-weight: 400;
+  color: var(--muted);
+}
+.group-threshold::before { content: "·"; margin-right: 0.45em; }
+
 .level-ok .group-word { color: var(--green); }
 .level-warning .group-word { color: var(--amber); }
 .level-critical .group-word,

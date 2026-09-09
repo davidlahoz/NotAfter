@@ -13,7 +13,14 @@ from typing import Any
 from sqlmodel import Session, col, select
 
 from app.auth import User
-from app.formatting import Status, StatusLevel, clean_text, status_for, today
+from app.formatting import (
+    Status,
+    StatusLevel,
+    clean_text,
+    status_for,
+    threshold_phrase,
+    today,
+)
 from app.models import (
     AuditLog,
     Certificate,
@@ -103,6 +110,7 @@ class StatusGroup:
 
     status: Status
     certificates: list[Certificate]
+    threshold: str
 
     @property
     def count(self) -> int:
@@ -140,7 +148,11 @@ def group_by_status(
         StatusLevel.OK,
     )
     return [
-        StatusGroup(status=meanings[level], certificates=grouped[level])
+        StatusGroup(
+            status=meanings[level],
+            certificates=grouped[level],
+            threshold=threshold_phrase(level, warn_days=warn_days, critical_days=critical_days),
+        )
         for level in order
         if level in grouped
     ]

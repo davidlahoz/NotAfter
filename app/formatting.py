@@ -105,6 +105,24 @@ def status_for(days: int, *, warn_days: int = 60, critical_days: int = 30) -> St
     )
 
 
+def threshold_phrase(level: StatusLevel, *, warn_days: int, critical_days: int) -> str:
+    """Where this status begins, in days.
+
+    It sits on the group heading rather than in a legend at the foot of the
+    page: once the groups say what to do in words, a separate key repeats
+    everything except these numbers.
+    """
+    match level:
+        case StatusLevel.OK:
+            return f"more than {warn_days} days left"
+        case StatusLevel.WARNING:
+            return f"{warn_days} days or fewer"
+        case StatusLevel.CRITICAL:
+            return f"{critical_days} days or fewer"
+        case StatusLevel.EXPIRED:
+            return "past the date"
+
+
 def humanise_list(values: list[str], empty: str = "nobody") -> str:
     """``a, b and c`` for a list of addresses."""
     cleaned = [value for value in values if value]

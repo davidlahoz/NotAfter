@@ -14,6 +14,7 @@
     <h3 class="group-head">
       <span class="group-word">{{ group.status.word }}</span>
       <span class="group-count">{{ group.count }}</span>
+      <span class="group-threshold">{{ group.threshold }}</span>
     </h3>
     <p class="group-sentence">{{ group.status.sentence }}</p>
     <div class="board">
@@ -28,20 +29,8 @@ you can upload the file, or just type in the date if you do not have it.{% else 
 Ask someone with edit rights to add the first one.{% endif %}</p>
 {% endif %}
 
-<h2>Where the lines fall</h2>
-<section class="legend">
-  <p>Each heading above says what to do. These are the days at which one
-  becomes the next.</p>
-  <dl>
-    <dt class="swatch-ok">In date</dt>
-    <dd>more than {{ app_settings.warn_days }} days left</dd>
-    <dt class="swatch-warning">Plan the renewal</dt>
-    <dd>{{ app_settings.warn_days }} days or fewer</dd>
-    <dt class="swatch-critical">Renew now</dt>
-    <dd>{{ app_settings.critical_days }} days or fewer</dd>
-    <dt class="swatch-expired">Expired</dt>
-    <dd>the date has passed</dd>
-  </dl>
-  {% if archived_count %}<p><a href="/archive">{{ archived_count }} archived certificate{{ '' if archived_count == 1 else 's' }}</a></p>{% endif %}
-</section>
+{% if archived_count %}
+<p class="small muted"><a href="/archive">{{ archived_count }} archived
+  certificate{{ '' if archived_count == 1 else 's' }}</a></p>
+{% endif %}
 {% endblock %}

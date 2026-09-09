@@ -79,12 +79,28 @@ def test_board_formats_the_date_in_words(viewer: Client, session: Session, app_s
     assert f"Valid until {expected}" in viewer.get("/").text
 
 
-def test_board_explains_where_the_lines_fall(viewer: Client, session: Session, app_settings):
+def test_each_group_says_where_its_line_falls(viewer: Client, session: Session, app_settings):
+    """The numbers sit on the heading they describe, not in a key at the foot."""
+    _add(session, "Expired one", -2)
+    _add(session, "Urgent", 5)
+    _add(session, "Soon", 50)
+    _add(session, "Fine", 300)
     body = viewer.get("/").text
-    assert "Where the lines fall" in body
-    assert "In date" in body and "Expired" in body
-    assert "Renew now" in body and "Plan the renewal" in body
+
+    assert "past the date" in body
+    assert f"{app_settings.critical_days} days or fewer" in body
     assert f"{app_settings.warn_days} days or fewer" in body
+    assert f"more than {app_settings.warn_days} days left" in body
+
+
+def test_the_board_has_no_separate_legend(viewer: Client, session: Session, app_settings):
+    """Once the groups say it in words, a key repeats all but the numbers."""
+    _add(session, "Integration PROD", 12)
+    body = viewer.get("/").text
+    assert "Where the lines fall" not in body
+    assert 'class="legend"' not in body
+    # And each threshold is stated once, not twice.
+    assert body.count(f"{app_settings.critical_days} days or fewer") == 1
 
 
 def test_the_board_carries_no_standing_advice(viewer: Client, session: Session, app_settings):
