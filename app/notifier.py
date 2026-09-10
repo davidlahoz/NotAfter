@@ -368,6 +368,7 @@ class Notifier:
             f"Expires: {format_date(cert.not_after)}\n\n"
             f"Details: {self.detail_url(cert)}\n\n"
             f"{app_settings.contact_line}\n"
+            f"{email_channel.NO_REPLY_NOTE}\n"
         )
         await email_channel.send_message(
             email_channel.Message(

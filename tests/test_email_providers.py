@@ -178,3 +178,20 @@ def test_smtp_still_builds_a_native_invite():
     calendar_parts = [part for part in built.walk() if part.get_content_type() == "text/calendar"]
     assert any(part.get_param("method") == "REQUEST" for part in calendar_parts)
     assert built["From"] == "No After <no-after@example.org>"
+
+
+def test_every_message_says_it_takes_no_replies():
+    """The address only sends, and people should not learn that from a bounce."""
+    import datetime as dt
+
+    from app.models import Certificate
+    from app.notify.email import NO_REPLY_NOTE, render_notification
+
+    cert = Certificate(
+        label="Integration PROD", not_after=dt.datetime.now() + dt.timedelta(days=30)
+    )
+    _subject, text, html_body = render_notification(
+        cert, 30, detail_url="https://x/1", contact_line="Ask the integration team."
+    )
+    assert NO_REPLY_NOTE in text
+    assert NO_REPLY_NOTE in html_body

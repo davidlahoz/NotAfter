@@ -272,17 +272,33 @@ curl -s http://127.0.0.1:8087/healthz
 Open `https://certs.example.org`, sign in through Access, and go to
 **Settings** to add the notification recipients.
 
-### 5. Consider letting the sending domain receive mail
+### 5. Tell the world the sending domain takes no mail
 
-Everything this app sends comes from `EMAIL_FROM`, and if that address cannot
-receive mail then anyone who simply *replies* to a notification gets a bounce.
-Publishing rather than inviting removes the automatic replies, but not the
-human ones.
+`EMAIL_FROM` only sends. Nothing this app produces asks for a reply — the
+calendar event is published rather than invited, and every message says so in
+as many words — but somebody will eventually press Reply anyway.
 
-The cheapest fix is an MX record that accepts and discards. If the domain is
-on Cloudflare, Email Routing will do it in a couple of clicks: add the domain,
-take the MX records it gives you, and route `EMAIL_FROM` to a real mailbox or
-to "drop". Nothing in the app needs to change.
+If the domain has no MX record at all, their mail server keeps trying to
+connect, fails, and eventually hands them a delivery failure that reads as
+though something is broken. A **null MX** ([RFC 7505](https://www.rfc-editor.org/rfc/rfc7505))
+says the domain accepts no mail, so the rejection is immediate and its reason
+is plain:
+
+| Field | Value |
+|---|---|
+| Type | `MX` |
+| Name | the sending subdomain, for example `notifications` |
+| Mail server | `.` — a single dot |
+| Priority | `0` |
+
+Put it on the name in `EMAIL_FROM`, which is usually a subdomain of your own,
+and check first that nothing else already answers there. It does not affect
+sending: providers verify a domain with their own records on their own names,
+and this one is separate from those.
+
+If you would rather read replies, do the opposite — give the domain a real MX
+and a mailbox. Cloudflare Email Routing does this for a subdomain under
+**Email Routing → Settings → Subdomains**, and writes the records itself.
 
 ### 6. Microsoft Teams (optional)
 

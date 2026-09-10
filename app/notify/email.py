@@ -25,7 +25,7 @@ import ssl
 from dataclasses import dataclass, field
 from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
-from typing import Any
+from typing import Any, Final
 
 import aiosmtplib
 import httpx
@@ -35,6 +35,11 @@ from app.formatting import countdown_phrase, format_date, status_for
 from app.logging_setup import logger, redact
 from app.models import Certificate
 from app.notify import DeliveryError
+
+#: Said on every message. The address these come from only sends, so a reply
+#: fails to deliver — better to say so than to let somebody find out by
+#: getting a bounce hours later.
+NO_REPLY_NOTE: Final = "This address does not accept replies."
 
 
 @dataclass(slots=True)
@@ -307,6 +312,7 @@ def render_notification(
         "  3. Register the new file in No After so this reminder moves on.\n\n"
         f"Details: {detail_url}\n\n"
         f"{contact_line}\n"
+        f"{NO_REPLY_NOTE}\n"
     )
 
     rows = "".join(
@@ -337,6 +343,7 @@ color:#232628;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;"
 </ol>
 <p style="margin:0 0 20px;font-size:14px;">
 <a href="{html.escape(detail_url)}" style="color:#ff4700;">Open this certificate in No After</a></p>
-<p style="margin:0;color:#6b7075;font-size:13px;">{html.escape(contact_line)}</p>
+<p style="margin:0 0 4px;color:#6b7075;font-size:13px;">{html.escape(contact_line)}</p>
+<p style="margin:0;color:#6b7075;font-size:13px;">{html.escape(NO_REPLY_NOTE)}</p>
 </div></body></html>"""
     return subject, text, html_body
