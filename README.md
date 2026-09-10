@@ -272,33 +272,78 @@ curl -s http://127.0.0.1:8087/healthz
 Open `https://certs.example.org`, sign in through Access, and go to
 **Settings** to add the notification recipients.
 
-### 5. Tell the world the sending domain takes no mail
+### 5. Decide what happens to mail sent *to* the app
 
-`EMAIL_FROM` only sends. Nothing this app produces asks for a reply — the
-calendar event is published rather than invited, and every message says so in
-as many words — but somebody will eventually press Reply anyway.
+`EMAIL_FROM` only sends. Nothing here asks for a reply — the calendar event is
+published rather than invited, and every message says as much in a line at the
+foot — but somebody will eventually press Reply anyway, and what they get back
+is worth choosing deliberately.
 
-If the domain has no MX record at all, their mail server keeps trying to
-connect, fails, and eventually hands them a delivery failure that reads as
-though something is broken. A **null MX** ([RFC 7505](https://www.rfc-editor.org/rfc/rfc7505))
-says the domain accepts no mail, so the rejection is immediate and its reason
-is plain:
+**Doing nothing is the worst of the three.** With no MX record at all, a
+sending mail server falls back to the address's A record
+([RFC 5321 §5.1](https://www.rfc-editor.org/rfc/rfc5321#section-5.1)) and tries
+SMTP against whatever is there — usually a web server or a CDN, which refuses
+the connection. The sender retries for hours and finally reports that the
+recipient's mail system "actively refused a connection", which reads like an
+outage at your end rather than an address that never took mail.
+
+| | Sender sees | Set up |
+|---|---|---|
+| No MX | A confusing bounce, hours later | nothing |
+| **Null MX** | An immediate, plain rejection | one record |
+| **Accept and drop** | Nothing; believes it arrived | a mail service |
+
+**Null MX** ([RFC 7505](https://www.rfc-editor.org/rfc/rfc7505)) declares that a
+domain accepts no mail, so the rejection is instant and its reason is accurate.
+One record, no service, nothing to run:
 
 | Field | Value |
 |---|---|
 | Type | `MX` |
-| Name | the sending subdomain, for example `notifications` |
+| Name | the name in `EMAIL_FROM`, for example `notifications` |
 | Mail server | `.` — a single dot |
 | Priority | `0` |
 
-Put it on the name in `EMAIL_FROM`, which is usually a subdomain of your own,
-and check first that nothing else already answers there. It does not affect
-sending: providers verify a domain with their own records on their own names,
-and this one is separate from those.
+**Accept and drop** is the quieter option: a real mail service takes the
+message and discards it, so nobody is ever told anything. On Cloudflare, with
+`EMAIL_FROM=noreply@notifications.example.org`:
 
-If you would rather read replies, do the opposite — give the domain a real MX
-and a mailbox. Cloudflare Email Routing does this for a subdomain under
-**Email Routing → Settings → Subdomains**, and writes the records itself.
+1. **Email Routing** on `example.org` → **Enable**. Cloudflare writes its own
+   MX and SPF records to the zone.
+2. **Settings → Subdomains** → add `notifications.example.org`. Email Routing
+   is a zone-level feature and reaches the apex only; a subdomain is not
+   covered until it is named here, however many rules you write.
+3. **Routing rules → Catch-all → Drop → Save.**
+
+Three things to know before enabling it:
+
+* **It takes over the domain's MX records.** If the zone already receives mail
+  through another provider, enabling Email Routing will displace it. Check the
+  apex MX first, and if the domain is still on another mail service, either
+  retire it there first or send from a domain that is not used for mail.
+* **Your provider's sending records are not affected.** They live on their own
+  names — a bounce subdomain such as `send.notifications.example.org` and a
+  DKIM selector such as `resend._domainkey.notifications.example.org` — none of
+  which collide with what Email Routing adds.
+* **Dropping is silent by design.** The catch-all covers *every* address on the
+  domain, and each one accepts and discards without a trace. Somebody writing
+  to a colleague at that domain would believe they had been read. Point it at a
+  domain, or a subdomain, that exists only for this.
+
+Whichever you choose, check it rather than trusting the dashboard. `dig` shows
+what the world sees, and an SMTP session that stops at `RCPT TO` shows what a
+sender would be told without sending anything:
+
+```bash
+dig +short MX notifications.example.org
+python3 - <<'PY'
+import smtplib
+s = smtplib.SMTP("route1.mx.cloudflare.net", 25, timeout=15); s.ehlo("probe.example.org")
+s.mail("probe@example.org")
+print(s.rcpt("noreply@notifications.example.org"))   # 250 = accepted then dropped
+s.quit()                                             # 550 = rejected, sender is told
+PY
+```
 
 ### 6. Microsoft Teams (optional)
 

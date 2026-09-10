@@ -184,12 +184,12 @@ async def test_healthz_names_no_certificate(
 ):
     """It is unauthenticated so the container can call it."""
     outbox.fail_email = True
-    _cert(session, "p11-lobster-prod-vm.internal.example")
+    _cert(session, "edi-gateway-prod.internal.example")
     await run_daily_job(session, Notifier(test_settings))
 
     body = editor.get("/healthz").json()
     rendered = str(body)
-    assert "p11-lobster-prod-vm" not in rendered
+    assert "edi-gateway-prod" not in rendered
     assert "detail" not in body["last_job"]
     assert body["last_job"]["failures"] == 1, "the count is still reported"
 
