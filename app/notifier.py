@@ -281,7 +281,7 @@ class Notifier:
         cert: Certificate,
         app_settings: AppSettings,
         *,
-        method: InviteMethod = InviteMethod.REQUEST,
+        method: InviteMethod = InviteMethod.PUBLISH,
         kinds: tuple[InviteKind, ...] = (InviteKind.EXPIRY,),
     ) -> list[SendOutcome]:
         """Send (or cancel) this certificate's calendar event.
@@ -299,7 +299,7 @@ class Notifier:
         if not recipients or not self._settings.email_configured:
             return outcomes
 
-        if method is InviteMethod.REQUEST and InviteKind.RENEW not in kinds:
+        if method is not InviteMethod.CANCEL and InviteKind.RENEW not in kinds:
             await self._retire_separate_renewal_event(session, cert, app_settings)
 
         for kind in kinds:
@@ -467,7 +467,7 @@ class Notifier:
             DeliveryError: if the mail server refused the message.
         """
         await self._send_invite_email(
-            cert, InviteKind.RENEW, 0, InviteMethod.REQUEST, [to], app_settings
+            cert, InviteKind.RENEW, 0, InviteMethod.PUBLISH, [to], app_settings
         )
 
 

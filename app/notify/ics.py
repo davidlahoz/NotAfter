@@ -1,4 +1,4 @@
-"""iCalendar invites for certificate expiry.
+"""iCalendar events for certificate expiry.
 
 One all-day event per certificate, on the expiry date, carrying every reminder
 as a VALARM — including the one that says to start the renewal. A second event
@@ -8,6 +8,13 @@ which is what alarms exist to avoid.
 The UID is derived from the record id and is stable, so later updates and
 cancellations replace the event in Outlook and Google Calendar rather than
 creating duplicates.
+
+These are published, not invited. A ``METHOD:REQUEST`` with attendees makes
+the item a meeting, and Outlook then emails the organiser whenever somebody
+accepts or declines it — which, for the send-only address these come from,
+bounces back to the person who clicked as a delivery failure. Nobody needs to
+accept a notice that a certificate expires, so there is nothing to respond
+to: ``METHOD:PUBLISH``, no attendee list, no RSVP.
 """
 
 from __future__ import annotations
@@ -63,8 +70,18 @@ def event_summary(cert: Certificate, kind: InviteKind) -> str:
     return f"Renew certificate: {cert.label}"
 
 
-def _description(cert: Certificate, kind: InviteKind, detail_url: str, renew_lead_days: int) -> str:
-    """Plain-language body of the calendar event."""
+def _description(
+    cert: Certificate,
+    kind: InviteKind,
+    detail_url: str,
+    renew_lead_days: int,
+    notified: Sequence[str] = (),
+) -> str:
+    """Plain-language body of the calendar event.
+
+    ``notified`` says who else received it. That used to be visible as the
+    attendee list, which is the thing that made clients ask for a reply.
+    """
     expiry = format_date(cert.not_after)
     subject = cert.subject_cn or cert.label
     if kind is InviteKind.EXPIRY:
@@ -90,6 +107,9 @@ def _description(cert: Certificate, kind: InviteKind, detail_url: str, renew_lea
         "",
         f"Details: {detail_url}",
     ]
+    if notified:
+        lines.insert(-2, f"Also told: {', '.join(notified)}")
+        lines.insert(-2, "")
     if cert.owner_email:
         lines.insert(1, f"Owner: {cert.owner_email}")
     return "\n".join(lines)
@@ -122,28 +142,39 @@ def build_calendar(
     event.add("dtstamp", now or datetime.now(UTC))
     event.add("dtstart", day)
     event.add("dtend", day + timedelta(days=1))
-    event.add("summary", event_summary(cert, kind))
-    event.add("description", _description(cert, kind, detail_url, renew_lead_days))
+    cancelling = method is InviteMethod.CANCEL
+    summary = event_summary(cert, kind)
+    # If a client does not act on the cancellation, the title still says so.
+    event.add("summary", f"Cancelled: {summary}" if cancelling else summary)
+    event.add("description", _description(cert, kind, detail_url, renew_lead_days, attendees))
     event.add("sequence", sequence)
     event.add("transp", "TRANSPARENT")
     event.add("class", "PUBLIC")
     event.add("url", detail_url)
-    event.add("status", "CANCELLED" if method is InviteMethod.CANCEL else "CONFIRMED")
+    event.add("status", "CANCELLED" if cancelling else "CONFIRMED")
+    # Outlook reads this rather than TRANSP, and an expiry notice should not
+    # make anyone look busy.
+    event.add("x-microsoft-cdo-busystatus", "FREE")
 
     organizer = vCalAddress(f"MAILTO:{organizer_email}")
     organizer.params["cn"] = vText(organizer_name)
     event.add("organizer", organizer)
 
-    for address in attendees:
-        attendee = vCalAddress(f"MAILTO:{address}")
-        attendee.params["cn"] = vText(address)
-        attendee.params["cutype"] = vText("INDIVIDUAL")
-        attendee.params["role"] = vText("REQ-PARTICIPANT")
-        attendee.params["partstat"] = vText("NEEDS-ACTION")
-        attendee.params["rsvp"] = vText("TRUE")
-        event.add("attendee", attendee, encode=False)
-
+    # Attendees only under REQUEST, which this application no longer sends:
+    # an attendee with RSVP=TRUE is what makes Outlook mail the organiser on
+    # every accept and decline. Who else was told is stated in the
+    # description instead, where it informs without soliciting a reply.
     if method is InviteMethod.REQUEST:
+        for address in attendees:
+            attendee = vCalAddress(f"MAILTO:{address}")
+            attendee.params["cn"] = vText(address)
+            attendee.params["cutype"] = vText("INDIVIDUAL")
+            attendee.params["role"] = vText("REQ-PARTICIPANT")
+            attendee.params["partstat"] = vText("NEEDS-ACTION")
+            attendee.params["rsvp"] = vText("TRUE")
+            event.add("attendee", attendee, encode=False)
+
+    if not cancelling:
         reminders = (
             alarms_for(renew_lead_days, alarm_days)
             if kind is InviteKind.EXPIRY

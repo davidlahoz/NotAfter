@@ -128,14 +128,18 @@ def test_registering_sends_one_invite_carrying_every_reminder(
     invites = outbox.invites
     assert len(invites) == 1
     invite = invites[0]
-    assert invite.method == "REQUEST"
+    assert invite.method == "PUBLISH", "an event to add, not a meeting to accept"
     assert invite.to == ["calendar@example.org", "owner@example.org"]
 
     body = invite.calendar.decode() if invite.calendar else ""
     assert "SUMMARY:Certificate expires: Integration PROD" in body
     assert "Renew certificate" not in body
     assert body.count("BEGIN:VEVENT") == 1
-    assert "METHOD:REQUEST" in body
+    assert "METHOD:PUBLISH" in body
+    # The three things that make Outlook mail the organiser on accept/decline.
+    assert "ATTENDEE" not in body
+    assert "RSVP" not in body
+    assert "PARTSTAT" not in body
     assert "SEQUENCE:0" in body
     # The global renewal lead is 30 days, and the alarms are 7 and 1.
     assert "TRIGGER:-P30D" in body
@@ -197,7 +201,7 @@ def test_renewal_supersedes_cancels_and_reinvites(
     assert successor.not_after.date() == new_cert.certificate.not_valid_after_utc.date()
 
     cancels = [invite for invite in outbox.invites if invite.method == InviteMethod.CANCEL.value]
-    requests = [invite for invite in outbox.invites if invite.method == InviteMethod.REQUEST.value]
+    requests = [invite for invite in outbox.invites if invite.method == InviteMethod.PUBLISH.value]
     assert len(cancels) == 1
     assert len(requests) == 1
     for invite in cancels:
@@ -333,7 +337,11 @@ async def test_changing_the_timing_moves_invites_people_already_have(
     body = bodies[0]
     assert f"UID:cert-{cert.id}-expiry@notafter" in body
     assert "SEQUENCE:1" in body
-    assert "METHOD:REQUEST" in body
+    assert "METHOD:PUBLISH" in body
+    # The three things that make Outlook mail the organiser on accept/decline.
+    assert "ATTENDEE" not in body
+    assert "RSVP" not in body
+    assert "PARTSTAT" not in body
     assert "TRIGGER:-P45D" in body, "the new lead time"
     assert "TRIGGER:-P14D" in body
     assert "TRIGGER:-P2D" in body
@@ -401,7 +409,7 @@ async def test_an_existing_second_event_is_withdrawn_once(
     await notifier.send_invites(session, cert, app_settings)
 
     methods = sorted(invite.method or "" for invite in outbox.invites)
-    assert methods == ["CANCEL", "REQUEST"], "withdraw the old one, refresh the real one"
+    assert methods == ["CANCEL", "PUBLISH"], "withdraw the old one, refresh the real one"
     cancelled = next(i for i in outbox.invites if i.method == "CANCEL")
     body = cancelled.calendar.decode() if cancelled.calendar else ""
     assert f"UID:cert-{cert.id}-renew@notafter" in body
@@ -410,7 +418,7 @@ async def test_an_existing_second_event_is_withdrawn_once(
     # And only once: a second run leaves it alone.
     outbox.mail.clear()
     await notifier.send_invites(session, cert, app_settings)
-    assert [i.method for i in outbox.invites] == ["REQUEST"]
+    assert [i.method for i in outbox.invites] == ["PUBLISH"]
 
 
 def test_a_certificate_never_produces_more_than_one_event(
@@ -427,3 +435,46 @@ def test_a_certificate_never_produces_more_than_one_event(
     assert rows[0].kind is InviteKind.EXPIRY
     for body in _ics_bodies(outbox):
         assert body.count("BEGIN:VEVENT") == 1
+
+
+def test_nothing_asks_outlook_to_reply_to_the_organiser(
+    editor: Client, session: Session, outbox: Outbox, app_settings
+):
+    """Accepting a meeting emails the organiser, and ours cannot receive mail.
+
+    The address these come from is send-only, so an accept or a decline
+    reached the sender's own mail system, failed to connect, and came back to
+    the person who clicked as a delivery failure. There is nothing to accept
+    about a certificate expiring, so the event is published rather than
+    invited: no attendees, no RSVP, nothing to respond to.
+    """
+    _register(editor, make_cert(days_until_expiry=200))
+    body = _ics_bodies(outbox)[0]
+
+    assert "METHOD:PUBLISH" in body
+    assert "METHOD:REQUEST" not in body
+    for property_name in ("ATTENDEE", "RSVP", "PARTSTAT", "NEEDS-ACTION"):
+        assert property_name not in body, f"{property_name} solicits a reply"
+
+    # The organiser stays: it names the sender, and without an attendee list
+    # no client treats it as somewhere to send a response.
+    assert "ORGANIZER" in body
+    # And an expiry notice should not make anyone look busy.
+    assert "X-MICROSOFT-CDO-BUSYSTATUS:FREE" in body
+    assert "TRANSP:TRANSPARENT" in body
+
+
+def test_a_cancellation_says_so_even_if_a_client_ignores_it(
+    editor: Client, session: Session, outbox: Outbox, app_settings
+):
+    """A published event is an appointment; not every client acts on CANCEL."""
+    _register(editor, make_cert(days_until_expiry=200))
+    record = _only(session)
+    outbox.mail.clear()
+
+    editor.post_form(f"/certificates/{record.id}/archive", {"reason": "done"})
+
+    body = _ics_bodies(outbox)[0]
+    assert "METHOD:CANCEL" in body
+    assert "STATUS:CANCELLED" in body
+    assert "SUMMARY:Cancelled: Certificate expires:" in body

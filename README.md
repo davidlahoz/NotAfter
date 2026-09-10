@@ -159,17 +159,26 @@ hour sends nothing extra.
 Failures are retried on the next run and shown on the settings page and
 `/healthz`.
 
-**Calendar invites.** Registering a certificate sends **one** invitation: an
-all-day event on the expiry date, with everyone who should know as attendees,
-carrying every reminder as an alarm — 30 days ahead to start the renewal, then
+**Calendar invites.** Registering a certificate sends **one** calendar event:
+an all-day event on the expiry date, carrying every reminder as an alarm — 30 days ahead to start the renewal, then
 7 days and 1 day, all configurable globally and per certificate. "Start
 renewing" and "this expires soon" are the same event seen from different
 distances, so a second invitation would only mean a second thing to accept and
 keep in step.
 
+It is **published, not invited** (`METHOD:PUBLISH`, no attendee list, no
+RSVP). A meeting invitation would make Outlook email the organiser every time
+somebody accepts or declines it — and the address these come from only sends,
+so each of those replies bounces back to the person who clicked as a delivery
+failure. Nobody needs to accept a notice that a certificate expires. Who else
+was told is named in the event's description instead, which informs without
+asking for an answer.
+
 The UID is stable, so replacing or archiving the certificate updates or
 cancels the event people already have in Outlook or Google Calendar rather
-than leaving it behind. Changing a timing re-sends the invitation for the same
+than leaving it behind. A cancellation also renames the event
+"Cancelled: …", because a published event is an appointment rather than a
+meeting and not every client acts on `METHOD:CANCEL`. Changing a timing re-sends the invitation for the same
 reason: a calendar only moves an event when it receives an update for that
 UID, so without it the new setting would apply to future registrations only
 and quietly disagree with what is already out there.
@@ -263,7 +272,19 @@ curl -s http://127.0.0.1:8087/healthz
 Open `https://certs.example.org`, sign in through Access, and go to
 **Settings** to add the notification recipients.
 
-### 5. Microsoft Teams (optional)
+### 5. Consider letting the sending domain receive mail
+
+Everything this app sends comes from `EMAIL_FROM`, and if that address cannot
+receive mail then anyone who simply *replies* to a notification gets a bounce.
+Publishing rather than inviting removes the automatic replies, but not the
+human ones.
+
+The cheapest fix is an MX record that accepts and discards. If the domain is
+on Cloudflare, Email Routing will do it in a couple of clicks: add the domain,
+take the MX records it gives you, and route `EMAIL_FROM` to a real mailbox or
+to "drop". Nothing in the app needs to change.
+
+### 6. Microsoft Teams (optional)
 
 In Teams, on the channel you want: **Workflows → "Post to a channel when a
 webhook request is received"**. Create it, copy the URL, and paste it into
@@ -284,7 +305,7 @@ The URL is a secret. It is stored in the database, never shown again after it
 is saved, and masked in log lines. The retired "Office 365 connector" webhooks
 are not supported — the payload NotAfter sends is an Adaptive Card 1.4.
 
-### 6. Check that notifications work
+### 7. Check that notifications work
 
 On the settings page: **Send test email to me**, **Send test Teams card**,
 **Send test invite to me**. Then **Run the notification job now** — it is

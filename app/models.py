@@ -63,8 +63,15 @@ class InviteKind(StrEnum):
 
 
 class InviteMethod(StrEnum):
-    """iCalendar METHOD used for an invite."""
+    """iCalendar METHOD used for a calendar item.
 
+    ``PUBLISH`` is what this application sends: an event to put in a calendar,
+    with nothing to accept or decline. ``REQUEST`` would make it a meeting
+    invitation, and every accept or decline would email the organiser —
+    which for a send-only address means a bounce for the person who clicked.
+    """
+
+    PUBLISH = "PUBLISH"
     REQUEST = "REQUEST"
     CANCEL = "CANCEL"
 
@@ -208,7 +215,7 @@ class CalendarInvite(SQLModel, table=True):
     kind: InviteKind
     uid: str = Field(index=True)
     sequence: int = Field(default=0)
-    method: InviteMethod = Field(default=InviteMethod.REQUEST)
+    method: InviteMethod = Field(default=InviteMethod.PUBLISH)
     event_date: date
     recipients: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     sent_at: datetime = Field(default_factory=utcnow, sa_column=Column(DateTime, nullable=False))

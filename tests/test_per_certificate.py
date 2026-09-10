@@ -61,7 +61,7 @@ async def test_one_email_goes_to_everyone_rather_than_one_each(
     ]
 
 
-def test_one_calendar_event_carries_every_attendee(
+def test_one_calendar_event_names_everyone_it_went_to(
     editor: Client, session: Session, outbox: Outbox, app_settings: AppSettings
 ):
     from tests.fixtures import make_cert
@@ -85,11 +85,12 @@ def test_one_calendar_event_carries_every_attendee(
     invites = outbox.invites
     assert len(invites) == 1, "one invite for the certificate, not one per person"
     for invite in invites:
-        body = invite.calendar.decode() if invite.calendar else ""
-        attendees = [line for line in body.splitlines() if "ATTENDEE" in line or "MAILTO" in line]
-        joined = " ".join(attendees)
+        body = (invite.calendar.decode() if invite.calendar else "").replace("\r\n ", "")
+        # Named in the description rather than as attendees: an attendee list
+        # is what makes a client ask the reader to accept or decline.
         for address in ("calendar@example.org", "ops@example.org", "owner@example.org"):
-            assert address in joined, f"{address} missing from the event"
+            assert address in body, f"{address} missing from the event"
+        assert "ATTENDEE" not in body
         assert invite.to == ["calendar@example.org", "ops@example.org", "owner@example.org"]
 
 
